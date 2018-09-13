@@ -56,6 +56,8 @@ namespace {
     // MachineRegisterInfo *MRI;
     // MachineFunction *MF;
 
+	int count = 0;
+
     bool runOnMachineFunction(MachineFunction &Fn) override;
 
     const char *getPassName() const override {
@@ -74,24 +76,59 @@ INITIALIZE_PASS(ARMTestPass, "arm-testpass",
 static bool isMemoryOp(const MachineInstr &MI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
+	//[TODO] check opcodes
   case ARM::VLDRS:
-  case ARM::VSTRS:
   case ARM::VLDRD:
-  case ARM::VSTRD:
+
   case ARM::LDRi12:
-  case ARM::STRi12:
   case ARM::tLDRi:
-  case ARM::tSTRi:
   case ARM::tLDRspi:
-  case ARM::tSTRspi:
   case ARM::t2LDRi8:
   case ARM::t2LDRi12:
-  case ARM::t2STRi8:
-  case ARM::t2STRi12:
+
+	case ARM::LDRH:
+	case ARM::tLDRHi:
+	case ARM::t2LDRHi8:
+	case ARM::t2LDRHi12:
+
+	case ARM::LDRBi12:
+	case ARM::tLDRBi:
+	case ARM::t2LDRBi8:
+	case ARM::t2LDRBi12:
+
+	case ARM::LDRSH:
+	case ARM::tLDRSH:
+	case ARM::t2LDRSHi8:
+	case ARM::t2LDRSHi12:
+
+	case ARM::LDRSB:
+	case ARM::tLDRSB:
+	case ARM::t2LDRSBi8:
+	case ARM::t2LDRSBi12:
+
+	case ARM::LDRrs:
+	case ARM::tLDRr:
+	case ARM::t2LDRs:
+
+	case ARM::t2LDRHs:
+	case ARM::tLDRHr:
+
+	case ARM::t2LDRBs:
+	case ARM::tLDRBr:
+
+	case ARM::t2LDRSHs:
+
+	case ARM::t2LDRSBs:
+
+	//[TODO] ldm is ommitted
+	case ARM::LDRD:
+	case ARM::t2LDRDi8:
+
     break;
   default:
     return false;
   }
+/*
   if (!MI.getOperand(1).isReg())
     return false;
 
@@ -120,7 +157,7 @@ static bool isMemoryOp(const MachineInstr &MI) {
   // Likewise don't mess with references to undefined addresses.
   if (MI.getOperand(1).isUndef())
     return false;
-
+*/
   return true;
 }
 
@@ -132,17 +169,28 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   // MRI = &Fn.getRegInfo();
   // MF  = &Fn;
 
+	dbgs() << "Current function name: [" << Fn.getName() << "]\n";
+	
+ 
   bool Modified = false;
+
   for (MachineBasicBlock &MFI : Fn) {
     for (MachineInstr &MI : MFI) {
       if (!isMemoryOp(MI))
         continue;
-      unsigned Reg = MI.getOperand(0).getReg();
-      AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri), Reg)
-                     .addReg(Reg).addImm(0));
+		count++;
+		dbgs() << "instrumented !!!!! : " << count  << "\n";
+
+	    unsigned Reg = MI.getOperand(1).getReg();
+		AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
+				.addReg(Reg)
+				.addReg(Reg));
+
+//		AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
+//				.addReg(Reg)
+//				.addReg(Reg));
     }
   }
-    // Modified |= RescheduleLoadStoreInstrs(&MFI);
 
   return Modified;
 }
