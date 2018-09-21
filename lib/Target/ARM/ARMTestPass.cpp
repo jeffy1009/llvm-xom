@@ -76,12 +76,15 @@ INITIALIZE_PASS(ARMTestPass, "arm-testpass",
 static bool isMemoryOp(const MachineInstr &MI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
-	//[TODO] check opcodes
-  case ARM::VLDRS:
-  case ARM::VLDRD:
+  case ARM::tLDRBi:
 
-  case ARM::LDRi12:
-  case ARM::tLDRi:
+	//[TODO] check opcodes
+    //      case ARM::VLDRS:
+    //      case ARM::VLDRD:
+    
+    //  case ARM::LDRi12:
+    //  case ARM::tLDRi:
+    /*
   case ARM::tLDRspi:
   case ARM::t2LDRi8:
   case ARM::t2LDRi12:
@@ -123,7 +126,7 @@ static bool isMemoryOp(const MachineInstr &MI) {
 	//[TODO] ldm is ommitted
 	case ARM::LDRD:
 	case ARM::t2LDRDi8:
-
+    */
     break;
   default:
     return false;
@@ -161,6 +164,8 @@ static bool isMemoryOp(const MachineInstr &MI) {
   return true;
 }
 
+//bool is
+
 bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   // TD = &Fn.getDataLayout();
   STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
@@ -169,26 +174,39 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   // MRI = &Fn.getRegInfo();
   // MF  = &Fn;
 
-	dbgs() << "Current function name: [" << Fn.getName() << "]\n";
-	
- 
+
+
   bool Modified = false;
 
   for (MachineBasicBlock &MFI : Fn) {
+    //    if(Fn.getName().compare(StringRef("sort")) != 0){
+    //      dbgs() << "Current function name: [" << Fn.getName() << "]\n";
+    //      continue;
+    //    }
+
+    
     for (MachineInstr &MI : MFI) {
-      if (!isMemoryOp(MI))
-        continue;
-		count++;
-		dbgs() << "instrumented !!!!! : " << count  << "\n";
+      if (!isMemoryOp(MI)) continue;
+	count++;
+        dbgs() << "instrumented !!!!! : " << count  << "\n";
 
-	    unsigned Reg = MI.getOperand(1).getReg();
-		AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
-				.addReg(Reg)
-				.addReg(Reg));
+        unsigned Reg1 = MI.getOperand(0).getReg();
+        unsigned Reg2 = MI.getOperand(1).getReg();
+        unsigned Imm = MI.getOperand(2).getImm();
+        Imm = Imm << 2;
+        //        unsigned Imm = 0;
+        AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::t2LDRBT))
+                       .addReg(Reg1)
+                       .addReg(Reg2)
+                       .addImm(Imm));
+        //   	unsigned Reg = MI.getOperand(1).getReg();
+        //	AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
+	//	.addReg(Reg)
+	//	.addReg(Reg));
 
-//		AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
-//				.addReg(Reg)
-//				.addReg(Reg));
+//	AddDefaultPred(BuildMI(MFI, MI, MI.getDebugLoc(), TII->get(ARM::tMOVr))
+//		.addReg(Reg)
+//		.addReg(Reg));
     }
   }
 
