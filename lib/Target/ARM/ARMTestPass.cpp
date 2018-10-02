@@ -58,6 +58,9 @@ namespace {
 
 	int count = 0;
 
+    void addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
+                       unsigned insttype, int imm, int imm2, unsigned reg1,
+                       unsigned reg2);
     bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
                     MachineBasicBlock &MFI);
     bool instLDRimm(unsigned Opcode, unsigned new_opcode,
@@ -281,9 +284,9 @@ static void transT4Inst(const unsigned Opcode, unsigned &pre_inst,
     }
 }
 
-static void addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
-                          const TargetInstrInfo* TII, unsigned insttype,
-                          int imm, int imm2, unsigned reg1, unsigned reg2) {
+void ARMTestPass::addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
+                                unsigned insttype, int imm, int imm2,
+                                unsigned reg1, unsigned reg2) {
   if(insttype == INST_ADD){
 
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12))
@@ -374,7 +377,7 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
     return false;
   }
 
-  if(pre_inst != INST_NONE) addOffsetInst(MI, MFI, TII, pre_inst,
+  if(pre_inst != INST_NONE) addOffsetInst(MI, MFI, pre_inst,
                                           offset_imm, imm_inst, base_reg, offset_reg);
 
   AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
@@ -382,7 +385,7 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
                  .addReg(base_reg)
                  .addImm(offset_imm));
 
-  if(post_inst != INST_NONE) addOffsetInst(MI, MFI, TII, post_inst,
+  if(post_inst != INST_NONE) addOffsetInst(MI, MFI, post_inst,
                                            offset_imm, imm_inst, base_reg, offset_reg);
 
   return true;
@@ -447,7 +450,7 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     return false;
   }
 
-  if(pre_inst != INST_NONE) addOffsetInst(MI, MFI, TII, pre_inst,
+  if(pre_inst != INST_NONE) addOffsetInst(MI, MFI, pre_inst,
                                           offset_imm, imm_inst, base_reg, offset_reg);
 
   AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
@@ -455,7 +458,7 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
                .addReg(base_reg)
                .addImm(offset_imm));
 
-  if(post_inst != INST_NONE) addOffsetInst(MI, MFI, TII, post_inst,
+  if(post_inst != INST_NONE) addOffsetInst(MI, MFI, post_inst,
                                            offset_imm, imm_inst, base_reg, offset_reg);
 
   return true;
