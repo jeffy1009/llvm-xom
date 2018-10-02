@@ -58,6 +58,12 @@ namespace {
 
 	int count = 0;
 
+    bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+                    MachineBasicBlock &MFI);
+    bool instLDRimm(unsigned Opcode, unsigned new_opcode,
+                    MachineInstr &MI, MachineBasicBlock &MFI);
+    bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI);
+
     bool runOnMachineFunction(MachineFunction &Fn) override;
 
     const char *getPassName() const override {
@@ -333,8 +339,8 @@ static void addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
   return;
 }
 
-static bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
-                       MachineBasicBlock &MFI, const TargetInstrInfo* TII){
+bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
+                             MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned dest_reg = MI.getOperand(0).getReg();
   unsigned base_reg = MI.getOperand(1).getReg();
   unsigned offset_reg = MI.getOperand(2).getReg();
@@ -384,9 +390,8 @@ static bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
 
 
-static bool instLDRimm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
-                       MachineBasicBlock &MFI, const TargetInstrInfo* TII){
-  return false;
+bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
+                             MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned dest_reg = MI.getOperand(0).getReg();
   unsigned base_reg = MI.getOperand(1).getReg();
   unsigned offset_reg = 0;
@@ -458,8 +463,7 @@ static bool instLDRimm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
 /// Returns true if instruction is a memory operation that this pass is capable
 /// of operating on.
-static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
-                         const TargetInstrInfo* TII) {
+bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
 
@@ -472,14 +476,14 @@ static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
   case ARM::t2LDR_POST:
     //  case ARM::LDR_PRE_IMM:
     //  case ARM::LDR_POST_IMM:
-    return instLDRimm(Opcode, ARM::t2LDRT, MI, MFI, TII);
+    return instLDRimm(Opcode, ARM::t2LDRT, MI, MFI);
     //LDR (literal) skip
     //LDR (register)
     //  case ARM::LDRrs:
   case ARM::tLDRr:
   case ARM::t2LDRs:         //instrumented but not checked
     //    return false;
-    return instLDRreg(Opcode, ARM::t2LDRT, MI, MFI, TII);
+    return instLDRreg(Opcode, ARM::t2LDRT, MI, MFI);
 
     //LDRH (immediate)
     //  case ARM::LDRH:           //not used??
@@ -490,12 +494,12 @@ static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
   case ARM::t2LDRH_POST:
     //  case ARM::LDRH_PRE:
     //  case ARM::LDRH_POST:
-    return instLDRimm(Opcode, ARM::t2LDRHT, MI, MFI, TII);
+    return instLDRimm(Opcode, ARM::t2LDRHT, MI, MFI);
     //LDRH (litenal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
   case ARM::tLDRHr:
-    return instLDRreg(Opcode, ARM::t2LDRHT, MI, MFI, TII);
+    return instLDRreg(Opcode, ARM::t2LDRHT, MI, MFI);
 
     //LDRB (immediate)
     //  case ARM::LDRBi12:        //not used??
@@ -506,12 +510,12 @@ static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
   case ARM::t2LDRB_POST:
     //  case ARM::LDRB_PRE_IMM:
     //  case ARM::LDRB_POST_IMM:
-    return instLDRimm(Opcode, ARM::t2LDRBT, MI, MFI, TII);
+    return instLDRimm(Opcode, ARM::t2LDRBT, MI, MFI);
     //LDRB (literal) skip
     //LDRB (register)
   case ARM::t2LDRBs:
   case ARM::tLDRBr:
-    return instLDRreg(Opcode, ARM::t2LDRBT, MI, MFI, TII);
+    return instLDRreg(Opcode, ARM::t2LDRBT, MI, MFI);
 
     //LDRSH (immediate)
     //  case ARM::LDRSH:          //not used??
@@ -522,11 +526,11 @@ static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
   case ARM::t2LDRSH_POST:
     //  case ARM::LDRSH_PRE:
     //  case ARM::LDRSH_POST:
-    return instLDRimm(Opcode, ARM::t2LDRSHT, MI, MFI, TII);
+    return instLDRimm(Opcode, ARM::t2LDRSHT, MI, MFI);
     //LDRSH (litenal) skip
     //LDRSH (register)
  case ARM::t2LDRSHs:
-   return instLDRreg(Opcode, ARM::t2LDRSHT, MI, MFI, TII);
+   return instLDRreg(Opcode, ARM::t2LDRSHT, MI, MFI);
 
     //LDRSB (immediate)
    //  case ARM::LDRSB:           //not used??
@@ -537,11 +541,11 @@ static bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI,
   case ARM::t2LDRSB_POST:
     //  case ARM::LDRSB_PRE:
     //  case ARM::LDRSB_POST:
-    return instLDRimm(Opcode, ARM::t2LDRSBT, MI, MFI, TII);
+    return instLDRimm(Opcode, ARM::t2LDRSBT, MI, MFI);
     //LDRSB (literal) skip
     //LDRSB (register)
   case ARM::t2LDRSBs:
-    return instLDRreg(Opcode, ARM::t2LDRSBT, MI, MFI, TII);
+    return instLDRreg(Opcode, ARM::t2LDRSBT, MI, MFI);
 
 
     //[TODO] load double, load multiple, float load
@@ -579,10 +583,16 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
         }
     */
     //    dbgs() << "Current function name: [" << Fn.getName() << "]\n";
-    for (MachineInstr &MI : MFI) {
-      if (!instMemoryOp(MI, MFI, TII)) continue;
-	count++;
-        //        dbgs() << "instrumented !!!!! : " << count  << "\n";
+    MachineBasicBlock::iterator MBBI = MFI.begin(), MBBIE = MFI.end();
+    while (MBBI != MBBIE) {
+      MachineBasicBlock::iterator NMBBI = std::next(MBBI);
+      MachineInstr &MI = *MBBI;
+      if (instMemoryOp(MI, MFI)) {
+        MI.eraseFromParent();
+        count++;
+      }
+      MBBI = NMBBI;
+      //        dbgs() << "instrumented !!!!! : " << count  << "\n";
     }
   }
 
