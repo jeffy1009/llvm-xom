@@ -440,6 +440,7 @@ void ARMPassConfig::addPreRegAlloc() {
     if (!DisableA15SDOptimization)
       addPass(createA15SDOptimizerPass());
   }
+    addPass(createARMTestPassPass());
 }
 
 void ARMPassConfig::addPreSched2() {
@@ -480,6 +481,4 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMOptimizeBarriersPass());
 
   addPass(createARMConstantIslandPass());
-
-  addPass(createARMTestPassPass());
 }
