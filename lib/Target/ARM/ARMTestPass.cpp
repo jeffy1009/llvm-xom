@@ -86,8 +86,6 @@ INITIALIZE_PASS(ARMTestPass, "arm-testpass",
 #define INST_ADD_REG 7
 #define INST_LSL 2
 #define INST_SUB 3
-#define INST_SUB_REG_IMM 5
-#define INST_SUB_REG 8
 #define INST_LSR 4
 
 static bool isLdrRegT1Encoding(unsigned Opcode){
@@ -302,31 +300,13 @@ unsigned ARMTestPass::addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tADDrr), T0)
                    .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
     return T0;
-  }else if(insttype == INST_SUB_REG){
-    unsigned T0 = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tSUBrr), T0)
-                   .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
-    return T0;
   }else if(insttype == INST_ADD_REG_IMM){
-     // mov.w rm, rm, lsl #imm
-     // adds rn, rn, rm
+     // add.w rd, rn, rm lsl #imm
     unsigned T0 = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    unsigned T1 = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2LSLri), T0)
-                                .addReg(reg2).addImm(imm2)));
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tADDrr), T1)
-                   .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
-    return T1;
-  }else if(insttype == INST_SUB_REG_IMM){
-    // subs rn, rn, rm
-    // mov.w rm, rm, lsl #imm
-    unsigned T0 = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    unsigned T1 = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tSUBrr), T0)
-                   .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
-    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2LSRri), T1)
-                                .addReg(reg2).addImm(imm2)));
-    return T1;
+    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), T0)
+                                .addReg(reg1, RegState::Kill).addReg(reg2)
+                                .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, 2))));
+    return T0;
   }
 
   return 0;
@@ -341,18 +321,14 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   //unsigned new_opcode = ARM::t2LDRi12;
   //unsigned new_opcode = ARM::t2LDRT;
   unsigned pre_inst = INST_NONE;
-  unsigned post_inst = INST_NONE;
   int imm_inst = INST_NONE;
-
 
   if(isLdrRegT1Encoding(Opcode)){
     // LDR<c> <Rt>,[<Rn>,<Rm>]
     dbgs() << "T1 encoding for ldr (reg) case\n";
 
     pre_inst = INST_ADD_REG;
-    post_inst = INST_SUB_REG;
     offset_imm = 0;
-
   }else if(isLdrRegT2Encoding(Opcode)){
     dbgs() << "T2 encoding for ldr (reg) case\n";
     //  LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
@@ -360,7 +336,6 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
     //    assert(offset_imm == 0 && "dhkwon test");
 
     pre_inst = INST_ADD_REG_IMM;
-    post_inst = INST_SUB_REG_IMM;
     imm_inst = offset_imm;
     offset_imm = 0;
   }else{
@@ -372,9 +347,6 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
 
   AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
                  .addReg(base_reg).addImm(offset_imm));
-
-  // if(post_inst != INST_NONE) addOffsetInst(MI, MFI, post_inst,
-  //                                          offset_imm, imm_inst, base_reg, offset_reg);
 
   return true;
 }
