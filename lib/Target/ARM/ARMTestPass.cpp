@@ -58,10 +58,11 @@ namespace {
 
 	int count = 0;
 
-    void addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
-                       unsigned insttype, unsigned dest_reg,
-                       unsigned reg1, unsigned reg2,
-                       int imm, int shift_imm);
+    void addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
+                          unsigned dest_reg, unsigned reg1, unsigned reg2,
+                          int shift_imm);
+    void addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
+                          unsigned dest_reg, unsigned reg1, int imm);
 
     bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
                     MachineBasicBlock &MFI);
@@ -246,24 +247,30 @@ static unsigned transT1Imm(unsigned Opcode, int imm){
   return imm;
 }
 
-void ARMTestPass::addOffsetInst(MachineInstr &MI, MachineBasicBlock &MFI,
-                                unsigned insttype, unsigned dest_reg,
-                                unsigned reg1, unsigned reg2,
-                                int imm, int shift_imm) {
+void ARMTestPass::
+addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
+                 unsigned dest_reg, unsigned reg1, unsigned reg2,
+                 int shift_imm) {
+  if(insttype == INST_ADD_REG){
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tADDrr), dest_reg)
+                   .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
+  }else if(insttype == INST_ADD_REG_IMM){
+    // add.w rd, rn, rm lsl #imm
+    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
+                                .addReg(reg1, RegState::Kill).addReg(reg2)
+                                .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, shift_imm))));
+  }
+}
+
+void ARMTestPass::
+addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
+                 unsigned dest_reg, unsigned reg1, int imm) {
   if(insttype == INST_ADD){
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
                    .addReg(reg1).addImm(imm));
   }else if(insttype == INST_SUB){
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
                    .addReg(reg1).addImm(imm));
-  }else if(insttype == INST_ADD_REG){
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tADDrr), dest_reg)
-                   .addReg(ARM::CPSR, RegState::Implicit).addReg(reg1).addReg(reg2));
-  }else if(insttype == INST_ADD_REG_IMM){
-     // add.w rd, rn, rm lsl #imm
-    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
-                                .addReg(reg1, RegState::Kill).addReg(reg2)
-                                .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, shift_imm))));
   }
 }
 
@@ -274,7 +281,6 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   unsigned offset_reg = MI.getOperand(2).getReg();
 
   unsigned new_inst = INST_NONE;
-  int new_inst_imm = 0;
   int shift_imm = 0;
 
   if(isLdrRegT1Encoding(Opcode)){
@@ -292,8 +298,7 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
 
   if(new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    addOffsetInst(MI, MFI, new_inst, tmp_reg, base_reg, offset_reg, new_inst_imm,
-                  shift_imm);
+    addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_reg, offset_reg, shift_imm);
     base_reg = tmp_reg;
   }
 
@@ -361,17 +366,17 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
   if(new_inst != INST_NONE) {
     switch (idx_mode) {
     case PRE_IDX: {
-      addOffsetInst(MI, MFI, new_inst, dest_reg2, base_reg, 0, new_inst_imm, 0);
+      addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_reg, new_inst_imm);
       base_reg = dest_reg2;
       break;
     }
     case POST_IDX: {
-      addOffsetInst(MI, MFI, new_inst, dest_reg2, base_reg, 0, new_inst_imm, 0);
+      addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_reg, new_inst_imm);
       break;
     }
     case NO_IDX: {
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-      addOffsetInst(MI, MFI, new_inst, tmp_reg, base_reg, 0, new_inst_imm, 0);
+      addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_reg, new_inst_imm);
       base_reg = tmp_reg;
       break;
     }
