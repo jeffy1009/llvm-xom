@@ -312,7 +312,8 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
   unsigned new_inst = INST_NONE;
   int new_inst_imm = 0;
   int offset_imm = 0;
-  bool post_idx = false;
+  enum { PRE_IDX, POST_IDX, NO_IDX };
+  unsigned idx_mode = NO_IDX;
 
   if(isT1Encoding(Opcode)){
     //Encoding T1 : LDR<c> <Rt>, [<Rn>{,#<imm5>}]
@@ -333,12 +334,13 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
       dest_reg2 = MI.getOperand(1).getReg();
       base_reg = MI.getOperand(2).getReg();
       orig_imm = MI.getOperand(3).getImm();
+      idx_mode = PRE_IDX;
     }else if(isT4PostEncoding(Opcode)){
       dbgs() << "T4 post-index encoding ldr (imm) case\n";
       dest_reg2 = MI.getOperand(1).getReg();
       base_reg = MI.getOperand(2).getReg();
       orig_imm = MI.getOperand(3).getImm();
-      post_idx = true;
+      idx_mode = POST_IDX;
     }else{
       dbgs() << "T4 encoding ldr (imm) case\n";
       base_reg = MI.getOperand(1).getReg();
@@ -357,12 +359,22 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
   }
 
   if(new_inst != INST_NONE) {
-    if (!post_idx) {
+    switch (idx_mode) {
+    case PRE_IDX: {
+      addOffsetInst(MI, MFI, new_inst, dest_reg2, base_reg, 0, new_inst_imm, 0);
+      base_reg = dest_reg2;
+      break;
+    }
+    case POST_IDX: {
+      addOffsetInst(MI, MFI, new_inst, dest_reg2, base_reg, 0, new_inst_imm, 0);
+      break;
+    }
+    case NO_IDX: {
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
       addOffsetInst(MI, MFI, new_inst, tmp_reg, base_reg, 0, new_inst_imm, 0);
       base_reg = tmp_reg;
-    } else {
-      addOffsetInst(MI, MFI, new_inst, dest_reg2, base_reg, 0, new_inst_imm, 0);
+      break;
+    }
     }
   }
 
