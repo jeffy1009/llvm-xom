@@ -83,50 +83,37 @@ namespace {
 INITIALIZE_PASS(ARMTestPass, "arm-testpass",
                 ARM_TESTPASS_NAME, false, false)
 
-#define INST_NONE 0
-#define INST_ADD 1
-#define INST_ADD_REG_IMM 6
-#define INST_ADD_REG 7
-#define INST_LSL 2
-#define INST_SUB 3
-#define INST_LSR 4
+enum { INST_NONE, INST_ADD_IMM, INST_SUB_IMM, INST_ADD_REG, INST_ADD_REG_SHFT };
 
 static bool isLdrRegT1Encoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::tLDRr:
-  case ARM::tLDRHr:
-  case ARM::tLDRBr:
+  case ARM::tLDRr: case ARM::tLDRHr: case ARM::tLDRBr:
+  case ARM::tSTRr: case ARM::tSTRHr: case ARM::tSTRBr:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static bool isLdrRegT2Encoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::t2LDRs:
-  case ARM::t2LDRHs:
-  case ARM::t2LDRBs:
-  case ARM::t2LDRSHs:
-  case ARM::t2LDRSBs:
+  case ARM::t2LDRs: case ARM::t2LDRHs: case ARM::t2LDRBs:
+  case ARM::t2LDRSHs: case ARM::t2LDRSBs:
+  case ARM::t2STRs: case ARM::t2STRHs: case ARM::t2STRBs:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static bool isT1Encoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::tLDRi:
-  case ARM::tLDRHi:
-  case ARM::tLDRBi:
+  case ARM::tLDRi: case ARM::tLDRHi: case ARM::tLDRBi:
+  case ARM::tSTRi: case ARM::tSTRHi: case ARM::tSTRBi:
     return true;
   default:
     return false;
   }
-  return false;
 }
 /*
 static bool isT2Encoding(unsigned Opcode){
@@ -136,101 +123,54 @@ static bool isT2Encoding(unsigned Opcode){
 */
 static bool isT3Encoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::t2LDRi12:
-  case ARM::t2LDRHi12:
-  case ARM::t2LDRBi12:
-  case ARM::t2LDRSHi12:
-  case ARM::t2LDRSBi12:
+  case ARM::t2LDRi12: case ARM::t2LDRHi12: case ARM::t2LDRBi12:
+  case ARM::t2LDRSHi12: case ARM::t2LDRSBi12:
+  case ARM::t2STRi12: case ARM::t2STRHi12: case ARM::t2STRBi12:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static bool isT4Encoding(unsigned Opcode){
-switch(Opcode){
-  case ARM::t2LDRi8:
-  case ARM::t2LDRHi8:
-  case ARM::t2LDRBi8:
-  case ARM::t2LDRSHi8:
-  case ARM::t2LDRSBi8:
-
- case ARM::t2LDR_PRE:
- case ARM::t2LDR_POST:
-    // case ARM::LDR_PRE_IMM:
-    // case ARM::LDR_POST_IMM:
-
- case ARM::t2LDRH_PRE:
- case ARM::t2LDRH_POST:
-    // case ARM::LDRH_PRE:
-    // case ARM::LDRH_POST:
-
- case ARM::t2LDRB_PRE:
- case ARM::t2LDRB_POST:
-    // case ARM::LDRB_PRE_IMM:
-    // case ARM::LDRB_POST_IMM:
-
- case ARM::t2LDRSH_PRE:
- case ARM::t2LDRSH_POST:
-    // case ARM::LDRSH_PRE:
-    // case ARM::LDRSH_POST:
-
- case ARM::t2LDRSB_PRE:
- case ARM::t2LDRSB_POST:
-    // case ARM::LDRSB_PRE:
-    // case ARM::LDRSB_POST:
+  switch(Opcode){
+  case ARM::t2LDRi8: case ARM::t2LDRHi8: case ARM::t2LDRBi8:
+  case ARM::t2LDRSHi8: case ARM::t2LDRSBi8:
+  case ARM::t2LDR_PRE: case ARM::t2LDR_POST:
+  case ARM::t2LDRH_PRE: case ARM::t2LDRH_POST:
+  case ARM::t2LDRB_PRE: case ARM::t2LDRB_POST:
+  case ARM::t2LDRSH_PRE: case ARM::t2LDRSH_POST:
+  case ARM::t2LDRSB_PRE: case ARM::t2LDRSB_POST:
+  case ARM::t2STRi8: case ARM::t2STRHi8: case ARM::t2STRBi8:
+  case ARM::t2STR_PRE: case ARM::t2STR_POST:
+  case ARM::t2STRH_PRE: case ARM::t2STRH_POST:
+  case ARM::t2STRB_PRE: case ARM::t2STRB_POST:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static bool isT4PreEncoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::t2LDR_PRE:
-    //  case ARM::LDR_PRE_IMM:
-
-  case ARM::t2LDRH_PRE:
-    // case ARM::LDRH_PRE:
-
- case ARM::t2LDRB_PRE:
-    // case ARM::LDRB_PRE_IMM:
-
-  case ARM::t2LDRSH_PRE:
-    // case ARM::LDRSH_PRE:
-
- case ARM::t2LDRSB_PRE:
-    // case ARM::LDRSB_PRE:
+  case ARM::t2LDR_PRE: case ARM::t2LDRH_PRE: case ARM::t2LDRB_PRE:
+  case ARM::t2LDRSH_PRE: case ARM::t2LDRSB_PRE:
+  case ARM::t2STR_PRE: case ARM::t2STRH_PRE: case ARM::t2STRB_PRE:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static bool isT4PostEncoding(unsigned Opcode){
   switch(Opcode){
-  case ARM::t2LDR_POST:
-    //  case ARM::LDR_POST_IMM:
-
- case ARM::t2LDRH_POST:
-   // case ARM::LDRH_POST:
-
- case ARM::t2LDRB_POST:
-   // case ARM::LDRB_POST_IMM:
-
- case ARM::t2LDRSH_POST:
-   // case ARM::LDRSH_POST:
-
- case ARM::t2LDRSB_POST:
-   // case ARM::LDRSB_POST:
+  case ARM::t2LDR_POST: case ARM::t2LDRH_POST: case ARM::t2LDRB_POST:
+  case ARM::t2LDRSH_POST: case ARM::t2LDRSB_POST:
+  case ARM::t2STR_POST: case ARM::t2STRH_POST: case ARM::t2STRB_POST:
     return true;
   default:
     return false;
   }
-  return false;
 }
 
 static unsigned transT1Imm(unsigned Opcode, int imm){
@@ -256,7 +196,7 @@ addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                    .addReg(ARM::CPSR, RegState::Implicit)
                    .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
                    .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0));
-  }else if(insttype == INST_ADD_REG_IMM){
+  }else if(insttype == INST_ADD_REG_SHFT){
     // add.w rd, rn, rm lsl #imm
     AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
                                 .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
@@ -268,10 +208,10 @@ addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
 void ARMTestPass::
 addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, int imm) {
-  if(insttype == INST_ADD){
+  if(insttype == INST_ADD_IMM){
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
                    .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm));
-  }else if(insttype == INST_SUB){
+  }else if(insttype == INST_SUB_IMM){
     AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
                    .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm));
   }
@@ -279,7 +219,6 @@ addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
 
 bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
                              MachineInstr &MI, MachineBasicBlock &MFI) {
-  unsigned dest_reg = MI.getOperand(0).getReg();
   MachineOperand *value_MO = &MI.getOperand(0);
   MachineOperand *base_MO = &MI.getOperand(1);
   MachineOperand *offset_MO = &MI.getOperand(2);
@@ -294,7 +233,7 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   }else if(isLdrRegT2Encoding(Opcode)){
     // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
     dbgs() << "T2 encoding for ldr (reg) case\n";
-    new_inst = INST_ADD_REG_IMM;
+    new_inst = INST_ADD_REG_SHFT;
     shift_imm = MI.getOperand(3).getImm();
   }else{
     return false;
@@ -317,7 +256,6 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
 
 bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
                              MachineInstr &MI, MachineBasicBlock &MFI) {
-  unsigned dest_reg = MI.getOperand(0).getReg();
   MachineOperand *value_MO = &MI.getOperand(0);
   unsigned dest_reg2 = -1; // pre/post index
   MachineOperand *base_MO;
@@ -337,7 +275,7 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     //Encoding T3 : LDR<c>.W <Rt>,[<Rn>{,#<imm12>}]
     dbgs() << "T3 encoding ldr (imm) case\n";
     base_MO = &MI.getOperand(1);
-    new_inst = INST_ADD;
+    new_inst = INST_ADD_IMM;
     new_inst_imm = MI.getOperand(2).getImm();
   }else if(isT4Encoding(Opcode)){
     //Encoding T4 : LDR<c> <Rt>,[<Rn>,#-<imm8>]
@@ -361,10 +299,10 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     }
 
     if (orig_imm < 0) {
-      new_inst = INST_SUB;
+      new_inst = INST_SUB_IMM;
       new_inst_imm = -orig_imm;
     } else {
-      new_inst = INST_ADD;
+      new_inst = INST_ADD_IMM;
       new_inst_imm = orig_imm;
     }
   }else{
@@ -407,7 +345,6 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
 bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
-
     //LDR (immediate)
   case ARM::tLDRi:          //checked
     //  case ARM::tLDRspi:  //stack base load skip
@@ -415,27 +352,22 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRi8:        //not checked
   case ARM::t2LDR_PRE:
   case ARM::t2LDR_POST:
-    //  case ARM::LDR_PRE_IMM:
-    //  case ARM::LDR_POST_IMM:
     return instLDRimm(Opcode, ARM::t2LDRT, MI, MFI);
+
     //LDR (literal) skip
     //LDR (register)
-    //  case ARM::LDRrs:
   case ARM::tLDRr:
   case ARM::t2LDRs:         //instrumented but not checked
-    //    return false;
     return instLDRreg(Opcode, ARM::t2LDRT, MI, MFI);
 
     //LDRH (immediate)
-    //  case ARM::LDRH:           //not used??
   case ARM::tLDRHi:
   case ARM::t2LDRHi12:
   case ARM::t2LDRHi8:
   case ARM::t2LDRH_PRE:
   case ARM::t2LDRH_POST:
-    //  case ARM::LDRH_PRE:
-    //  case ARM::LDRH_POST:
     return instLDRimm(Opcode, ARM::t2LDRHT, MI, MFI);
+
     //LDRH (litenal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
@@ -443,15 +375,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     return instLDRreg(Opcode, ARM::t2LDRHT, MI, MFI);
 
     //LDRB (immediate)
-    //  case ARM::LDRBi12:        //not used??
   case ARM::tLDRBi:
   case ARM::t2LDRBi12:
   case ARM::t2LDRBi8:
   case ARM::t2LDRB_PRE:
   case ARM::t2LDRB_POST:
-    //  case ARM::LDRB_PRE_IMM:
-    //  case ARM::LDRB_POST_IMM:
     return instLDRimm(Opcode, ARM::t2LDRBT, MI, MFI);
+
     //LDRB (literal) skip
     //LDRB (register)
   case ARM::t2LDRBs:
@@ -459,45 +389,90 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     return instLDRreg(Opcode, ARM::t2LDRBT, MI, MFI);
 
     //LDRSH (immediate)
-    //  case ARM::LDRSH:          //not used??
   case ARM::tLDRSH:               //not used??
   case ARM::t2LDRSHi12:
   case ARM::t2LDRSHi8:
   case ARM::t2LDRSH_PRE:
   case ARM::t2LDRSH_POST:
-    //  case ARM::LDRSH_PRE:
-    //  case ARM::LDRSH_POST:
     return instLDRimm(Opcode, ARM::t2LDRSHT, MI, MFI);
+
     //LDRSH (litenal) skip
     //LDRSH (register)
- case ARM::t2LDRSHs:
-   return instLDRreg(Opcode, ARM::t2LDRSHT, MI, MFI);
+  case ARM::t2LDRSHs:
+    return instLDRreg(Opcode, ARM::t2LDRSHT, MI, MFI);
 
     //LDRSB (immediate)
-   //  case ARM::LDRSB:           //not used??
   case ARM::tLDRSB:
   case ARM::t2LDRSBi12:
   case ARM::t2LDRSBi8:
   case ARM::t2LDRSB_PRE:
   case ARM::t2LDRSB_POST:
-    //  case ARM::LDRSB_PRE:
-    //  case ARM::LDRSB_POST:
     return instLDRimm(Opcode, ARM::t2LDRSBT, MI, MFI);
+
     //LDRSB (literal) skip
     //LDRSB (register)
   case ARM::t2LDRSBs:
     return instLDRreg(Opcode, ARM::t2LDRSBT, MI, MFI);
 
-
     //[TODO] load double, load multiple, float load
     //LDRD
-    //  case ARM::LDRD:
   case ARM::t2LDRDi8:
 
     //VLDR
   case ARM::VLDRS:
   case ARM::VLDRD:
+    break;
 
+    //STR (immediate)
+  case ARM::tSTRi:          //checked
+    //  case ARM::tSTRspi:  //stack base load skip
+  case ARM::t2STRi12:       //checked
+  case ARM::t2STRi8:        //not checked
+  case ARM::t2STR_PRE:
+  case ARM::t2STR_POST:
+    return instLDRimm(Opcode, ARM::t2STRT, MI, MFI);
+
+    //STR (literal) skip
+    //STR (register)
+  case ARM::tSTRr:
+  case ARM::t2STRs:         //instrumented but not checked
+    return false;//instSTRreg(Opcode, ARM::t2STRT, MI, MFI);
+
+    //STRH (immediate)
+  case ARM::tSTRHi:
+  case ARM::t2STRHi12:
+  case ARM::t2STRHi8:
+  case ARM::t2STRH_PRE:
+  case ARM::t2STRH_POST:
+    return instLDRimm(Opcode, ARM::t2STRHT, MI, MFI);
+
+    //STRH (litenal) skip
+    //STRH (register)
+  case ARM::t2STRHs:
+  case ARM::tSTRHr:
+    return false; //instSTRreg(Opcode, ARM::t2STRHT, MI, MFI);
+
+    //STRB (immediate)
+  case ARM::tSTRBi:
+  case ARM::t2STRBi12:
+  case ARM::t2STRBi8:
+  case ARM::t2STRB_PRE:
+  case ARM::t2STRB_POST:
+    return instLDRimm(Opcode, ARM::t2STRBT, MI, MFI);
+
+    //STRB (literal) skip
+    //STRB (register)
+  case ARM::t2STRBs:
+  case ARM::tSTRBr:
+    return false; //instSTRreg(Opcode, ARM::t2STRBT, MI, MFI);
+
+    //[TODO] load double, load multiple, float load
+    //STRD
+  case ARM::t2STRDi8:
+
+    //VSTR
+  case ARM::VSTRS:
+  case ARM::VSTRD:
     break;
   default:
     return false;
