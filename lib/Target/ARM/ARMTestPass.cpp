@@ -64,10 +64,10 @@ namespace {
     void addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                           unsigned dest_reg, MachineOperand *reg1, int imm);
 
-    bool instLDRreg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
-                    MachineBasicBlock &MFI);
-    bool instLDRimm(unsigned Opcode, unsigned new_opcode,
-                    MachineInstr &MI, MachineBasicBlock &MFI);
+    bool instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+                 MachineBasicBlock &MFI, bool isStore);
+    bool instImm(unsigned Opcode, unsigned new_opcode,
+                 MachineInstr &MI, MachineBasicBlock &MFI, bool isStore);
     bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI);
 
     bool runOnMachineFunction(MachineFunction &Fn) override;
@@ -85,7 +85,7 @@ INITIALIZE_PASS(ARMTestPass, "arm-testpass",
 
 enum { INST_NONE, INST_ADD_IMM, INST_SUB_IMM, INST_ADD_REG, INST_ADD_REG_SHFT };
 
-static bool isLdrRegT1Encoding(unsigned Opcode){
+static bool isRegT1Encoding(unsigned Opcode){
   switch(Opcode){
   case ARM::tLDRr: case ARM::tLDRHr: case ARM::tLDRBr:
   case ARM::tSTRr: case ARM::tSTRHr: case ARM::tSTRBr:
@@ -95,7 +95,7 @@ static bool isLdrRegT1Encoding(unsigned Opcode){
   }
 }
 
-static bool isLdrRegT2Encoding(unsigned Opcode){
+static bool isRegT2Encoding(unsigned Opcode){
   switch(Opcode){
   case ARM::t2LDRs: case ARM::t2LDRHs: case ARM::t2LDRBs:
   case ARM::t2LDRSHs: case ARM::t2LDRSBs:
@@ -217,8 +217,9 @@ addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
   }
 }
 
-bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
-                             MachineInstr &MI, MachineBasicBlock &MFI) {
+bool ARMTestPass::
+instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+        MachineBasicBlock &MFI, bool isStore) {
   MachineOperand *value_MO = &MI.getOperand(0);
   MachineOperand *base_MO = &MI.getOperand(1);
   MachineOperand *offset_MO = &MI.getOperand(2);
@@ -226,13 +227,13 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   unsigned new_inst = INST_NONE;
   int shift_imm = 0;
 
-  if(isLdrRegT1Encoding(Opcode)){
+  if(isRegT1Encoding(Opcode)){
     // LDR<c> <Rt>,[<Rn>,<Rm>]
-    dbgs() << "T1 encoding for ldr (reg) case\n";
+    dbgs() << "T1 encoding for " << (isStore? "str" : "ldr") << " (reg) case\n";
     new_inst = INST_ADD_REG;
-  }else if(isLdrRegT2Encoding(Opcode)){
+  }else if(isRegT2Encoding(Opcode)){
     // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-    dbgs() << "T2 encoding for ldr (reg) case\n";
+    dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg) case\n";
     new_inst = INST_ADD_REG_SHFT;
     shift_imm = MI.getOperand(3).getImm();
   }else{
@@ -243,10 +244,16 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   if(new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value_reg,
+                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
                    .addReg(tmp_reg, RegState::Kill).addImm(0));
   } else {
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value_reg,
+                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
                    .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
                    .addImm(0));
   }
@@ -254,10 +261,11 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
   return true;
 }
 
-bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
-                             MachineInstr &MI, MachineBasicBlock &MFI) {
-  MachineOperand *value_MO = &MI.getOperand(0);
-  unsigned dest_reg2 = -1; // pre/post index
+bool ARMTestPass::
+instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+        MachineBasicBlock &MFI, bool isStore) {
+  MachineOperand *value_MO;
+  unsigned idx_reg = -1; // pre/post index
   MachineOperand *base_MO;
 
   unsigned new_inst = INST_NONE;
@@ -268,12 +276,14 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
 
   if(isT1Encoding(Opcode)){
     //Encoding T1 : LDR<c> <Rt>, [<Rn>{,#<imm5>}]
-    dbgs() << "T1 encoding ldr (imm) case\n";
+    dbgs() << "T1 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+    value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
     offset_imm = transT1Imm(Opcode, MI.getOperand(2).getImm());
   }else if(isT3Encoding(Opcode)){
     //Encoding T3 : LDR<c>.W <Rt>,[<Rn>{,#<imm12>}]
-    dbgs() << "T3 encoding ldr (imm) case\n";
+    dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+    value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
     new_inst = INST_ADD_IMM;
     new_inst_imm = MI.getOperand(2).getImm();
@@ -281,19 +291,32 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     //Encoding T4 : LDR<c> <Rt>,[<Rn>,#-<imm8>]
     int orig_imm;
     if(isT4PreEncoding(Opcode)){
-      dbgs() << "T4 pre-index encoding ldr (imm) case\n";
-      dest_reg2 = MI.getOperand(1).getReg();
+      dbgs() << "T4 pre-index encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+      if (isStore) {
+        value_MO = &MI.getOperand(1);
+        idx_reg = MI.getOperand(0).getReg();
+      } else {
+        value_MO = &MI.getOperand(0);
+        idx_reg = MI.getOperand(1).getReg();
+      }
       base_MO = &MI.getOperand(2);
       orig_imm = MI.getOperand(3).getImm();
       idx_mode = PRE_IDX;
     }else if(isT4PostEncoding(Opcode)){
-      dbgs() << "T4 post-index encoding ldr (imm) case\n";
-      dest_reg2 = MI.getOperand(1).getReg();
+      dbgs() << "T4 post-index encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+      if (isStore) {
+        value_MO = &MI.getOperand(1);
+        idx_reg = MI.getOperand(0).getReg();
+      } else {
+        value_MO = &MI.getOperand(0);
+        idx_reg = MI.getOperand(1).getReg();
+      }
       base_MO = &MI.getOperand(2);
       orig_imm = MI.getOperand(3).getImm();
       idx_mode = POST_IDX;
     }else{
-      dbgs() << "T4 encoding ldr (imm) case\n";
+      dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+      value_MO = &MI.getOperand(0);
       base_MO = &MI.getOperand(1);
       orig_imm = MI.getOperand(2).getImm();
     }
@@ -312,14 +335,20 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
   unsigned value_reg = value_MO->getReg();
   switch (idx_mode) {
   case PRE_IDX: {
-    addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
-                   .addReg(dest_reg2).addImm(offset_imm));
+    addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value_reg,
+                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
+                   .addReg(idx_reg).addImm(offset_imm));
     break;
   }
   case POST_IDX: {
-    addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+    addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value_reg,
+                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
                    .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
                    .addImm(offset_imm));
     break;
@@ -328,10 +357,16 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     if (new_inst != INST_NONE) {
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
       addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                     .addReg(value_reg,
+                             isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                             : RegState::Define)
                      .addReg(tmp_reg, RegState::Kill).addImm(offset_imm));
     } else {
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                     .addReg(value_reg,
+                             isStore? (value_MO->isKill() ? RegState::Kill : 0)
+                             : RegState::Define)
                      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
                      .addImm(offset_imm));
     }
@@ -352,13 +387,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRi8:        //not checked
   case ARM::t2LDR_PRE:
   case ARM::t2LDR_POST:
-    return instLDRimm(Opcode, ARM::t2LDRT, MI, MFI);
+    return instImm(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //LDR (literal) skip
     //LDR (register)
   case ARM::tLDRr:
   case ARM::t2LDRs:         //instrumented but not checked
-    return instLDRreg(Opcode, ARM::t2LDRT, MI, MFI);
+    return instReg(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //LDRH (immediate)
   case ARM::tLDRHi:
@@ -366,13 +401,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRHi8:
   case ARM::t2LDRH_PRE:
   case ARM::t2LDRH_POST:
-    return instLDRimm(Opcode, ARM::t2LDRHT, MI, MFI);
+    return instImm(Opcode, ARM::t2LDRHT, MI, MFI, false);
 
     //LDRH (litenal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
   case ARM::tLDRHr:
-    return instLDRreg(Opcode, ARM::t2LDRHT, MI, MFI);
+    return instReg(Opcode, ARM::t2LDRHT, MI, MFI, false);
 
     //LDRB (immediate)
   case ARM::tLDRBi:
@@ -380,13 +415,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRBi8:
   case ARM::t2LDRB_PRE:
   case ARM::t2LDRB_POST:
-    return instLDRimm(Opcode, ARM::t2LDRBT, MI, MFI);
+    return instImm(Opcode, ARM::t2LDRBT, MI, MFI, false);
 
     //LDRB (literal) skip
     //LDRB (register)
   case ARM::t2LDRBs:
   case ARM::tLDRBr:
-    return instLDRreg(Opcode, ARM::t2LDRBT, MI, MFI);
+    return instReg(Opcode, ARM::t2LDRBT, MI, MFI, false);
 
     //LDRSH (immediate)
   case ARM::tLDRSH:               //not used??
@@ -394,12 +429,12 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRSHi8:
   case ARM::t2LDRSH_PRE:
   case ARM::t2LDRSH_POST:
-    return instLDRimm(Opcode, ARM::t2LDRSHT, MI, MFI);
+    return instImm(Opcode, ARM::t2LDRSHT, MI, MFI, false);
 
     //LDRSH (litenal) skip
     //LDRSH (register)
   case ARM::t2LDRSHs:
-    return instLDRreg(Opcode, ARM::t2LDRSHT, MI, MFI);
+    return instReg(Opcode, ARM::t2LDRSHT, MI, MFI, false);
 
     //LDRSB (immediate)
   case ARM::tLDRSB:
@@ -407,12 +442,12 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRSBi8:
   case ARM::t2LDRSB_PRE:
   case ARM::t2LDRSB_POST:
-    return instLDRimm(Opcode, ARM::t2LDRSBT, MI, MFI);
+    return instImm(Opcode, ARM::t2LDRSBT, MI, MFI, false);
 
     //LDRSB (literal) skip
     //LDRSB (register)
   case ARM::t2LDRSBs:
-    return instLDRreg(Opcode, ARM::t2LDRSBT, MI, MFI);
+    return instReg(Opcode, ARM::t2LDRSBT, MI, MFI, false);
 
     //[TODO] load double, load multiple, float load
     //LDRD
@@ -430,13 +465,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRi8:        //not checked
   case ARM::t2STR_PRE:
   case ARM::t2STR_POST:
-    return instLDRimm(Opcode, ARM::t2STRT, MI, MFI);
+    return instImm(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //STR (literal) skip
     //STR (register)
   case ARM::tSTRr:
   case ARM::t2STRs:         //instrumented but not checked
-    return false;//instSTRreg(Opcode, ARM::t2STRT, MI, MFI);
+    return instReg(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //STRH (immediate)
   case ARM::tSTRHi:
@@ -444,13 +479,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRHi8:
   case ARM::t2STRH_PRE:
   case ARM::t2STRH_POST:
-    return instLDRimm(Opcode, ARM::t2STRHT, MI, MFI);
+    return instImm(Opcode, ARM::t2STRHT, MI, MFI, true);
 
     //STRH (litenal) skip
     //STRH (register)
   case ARM::t2STRHs:
   case ARM::tSTRHr:
-    return false; //instSTRreg(Opcode, ARM::t2STRHT, MI, MFI);
+    return instReg(Opcode, ARM::t2STRHT, MI, MFI, true);
 
     //STRB (immediate)
   case ARM::tSTRBi:
@@ -458,13 +493,13 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRBi8:
   case ARM::t2STRB_PRE:
   case ARM::t2STRB_POST:
-    return instLDRimm(Opcode, ARM::t2STRBT, MI, MFI);
+    return instImm(Opcode, ARM::t2STRBT, MI, MFI, true);
 
     //STRB (literal) skip
     //STRB (register)
   case ARM::t2STRBs:
   case ARM::tSTRBr:
-    return false; //instSTRreg(Opcode, ARM::t2STRBT, MI, MFI);
+    return instReg(Opcode, ARM::t2STRBT, MI, MFI, true);
 
     //[TODO] load double, load multiple, float load
     //STRD
