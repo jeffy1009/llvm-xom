@@ -280,6 +280,7 @@ addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
 bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
                              MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned dest_reg = MI.getOperand(0).getReg();
+  MachineOperand *value_MO = &MI.getOperand(0);
   MachineOperand *base_MO = &MI.getOperand(1);
   MachineOperand *offset_MO = &MI.getOperand(2);
 
@@ -299,13 +300,14 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
     return false;
   }
 
+  unsigned value_reg = value_MO->getReg();
   if(new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
                    .addReg(tmp_reg, RegState::Kill).addImm(0));
   } else {
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
                    .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
                    .addImm(0));
   }
@@ -316,6 +318,7 @@ bool ARMTestPass::instLDRreg(unsigned Opcode, unsigned new_opcode,
 bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
                              MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned dest_reg = MI.getOperand(0).getReg();
+  MachineOperand *value_MO = &MI.getOperand(0);
   unsigned dest_reg2 = -1; // pre/post index
   MachineOperand *base_MO;
 
@@ -368,29 +371,34 @@ bool ARMTestPass::instLDRimm(unsigned Opcode, unsigned new_opcode,
     return false;
   }
 
-  if(new_inst != INST_NONE) {
-    switch (idx_mode) {
-    case PRE_IDX: {
-      addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
-                     .addReg(dest_reg2).addImm(offset_imm));
-      break;
-    }
-    case POST_IDX: {
-      addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
-                     .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                     .addImm(offset_imm));
-      break;
-    }
-    case NO_IDX: {
+  unsigned value_reg = value_MO->getReg();
+  switch (idx_mode) {
+  case PRE_IDX: {
+    addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+                   .addReg(dest_reg2).addImm(offset_imm));
+    break;
+  }
+  case POST_IDX: {
+    addOffsetInstImm(MI, MFI, new_inst, dest_reg2, base_MO, new_inst_imm);
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
+                   .addImm(offset_imm));
+    break;
+  }
+  case NO_IDX: {
+    if (new_inst != INST_NONE) {
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
       addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), dest_reg)
+      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
                      .addReg(tmp_reg, RegState::Kill).addImm(offset_imm));
-      break;
+    } else {
+      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode), value_reg)
+                     .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
+                     .addImm(offset_imm));
     }
-    }
+    break;
+  }
   }
 
   return true;
