@@ -68,6 +68,8 @@ namespace {
                  MachineBasicBlock &MFI, bool isStore);
     bool instImm(unsigned Opcode, unsigned new_opcode,
                  MachineInstr &MI, MachineBasicBlock &MFI, bool isStore);
+    bool instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+                        MachineBasicBlock &MFI, bool isStore);
     bool instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI);
 
     bool runOnMachineFunction(MachineFunction &Fn) override;
@@ -377,6 +379,59 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   return true;
 }
 
+bool ARMTestPass::
+instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+               MachineBasicBlock &MFI, bool isStore) {
+  MachineOperand *value1_MO = &MI.getOperand(0);
+  unsigned value1_reg = value1_MO->getReg();
+  MachineOperand *value2_MO = &MI.getOperand(1);
+  unsigned value2_reg = value2_MO->getReg();
+  MachineOperand *base_MO = &MI.getOperand(2);
+  int orig_imm = MI.getOperand(3).getImm();
+  unsigned new_inst = INST_SUB_IMM;
+  int new_inst_imm = 0;
+  int offset_imm = 0;
+
+  dbgs() << (isStore? "strd" : "ldrd") << " (imm) case\n";
+  if (orig_imm < 0) {
+    new_inst = INST_SUB_IMM;
+    new_inst_imm = (-orig_imm);
+  } else {
+    new_inst = INST_ADD_IMM;
+    new_inst_imm = orig_imm;
+  }
+
+  if (new_inst != INST_NONE) {
+    unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value1_reg,
+                           isStore? (value1_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
+                   .addReg(tmp_reg).addImm(offset_imm));
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value2_reg,
+                           isStore? (value2_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
+                   .addReg(tmp_reg, RegState::Kill).addImm(offset_imm+4));
+  } else {
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value1_reg,
+                           isStore? (value1_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
+                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
+                   .addImm(offset_imm));
+    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+                   .addReg(value2_reg,
+                           isStore? (value2_MO->isKill() ? RegState::Kill : 0)
+                           : RegState::Define)
+                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
+                   .addImm(offset_imm+4));
+  }
+
+  return true;
+}
+
 bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
@@ -452,6 +507,7 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //[TODO] load double, load multiple, float load
     //LDRD
   case ARM::t2LDRDi8:
+    return instLDSTDouble(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //VLDR
   case ARM::VLDRS:
@@ -504,6 +560,7 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //[TODO] load double, load multiple, float load
     //STRD
   case ARM::t2STRDi8:
+    return instLDSTDouble(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //VSTR
   case ARM::VSTRS:
