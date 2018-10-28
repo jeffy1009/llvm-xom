@@ -65,6 +65,7 @@ add_llvm_target(ARMCodeGen
   Thumb2InstrInfo.cpp
   Thumb2SizeReduction.cpp
   ARMComputeBlockSize.cpp
+  ARMTestPass.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
   )
 

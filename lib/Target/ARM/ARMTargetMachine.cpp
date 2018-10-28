@@ -480,4 +480,6 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMOptimizeBarriersPass());
 
   addPass(createARMConstantIslandPass());
+
+  addPass(createARMTestPassPass());
 }
