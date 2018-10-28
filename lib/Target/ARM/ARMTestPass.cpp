@@ -58,6 +58,8 @@ namespace {
 
 	int count = 0;
 
+    bool requirePrivilege(unsigned Reg);
+
     void addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                           unsigned dest_reg, MachineOperand *reg1, MachineOperand *reg2,
                           int shift_imm);
@@ -189,6 +191,22 @@ static unsigned transT1Imm(unsigned Opcode, int imm){
   return imm;
 }
 
+bool ARMTestPass::requirePrivilege(unsigned Reg) {
+  assert(MRI->hasOneDef(Reg));
+  MachineInstr *MI = &*MRI->def_instr_begin(Reg);
+  switch (MI->getOpcode()) {
+  case ARM::t2MOVi: case ARM::t2MOVi16: case ARM::t2MOVi32imm:
+  case ARM::t2MOVCCi: case ARM::t2MOVCCi32imm: case ARM::t2MOVCCr: {
+    if (!MI->getOperand(1).isImm() || (unsigned)MI->getOperand(1).getImm() < 0xe0000000)
+      break;
+    dbgs() << "Not instrumented, Privilege required: ";
+    MI->dump();
+    return true;
+  }
+  }
+  return false;
+}
+
 void ARMTestPass::
 addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, MachineOperand *reg2,
@@ -243,6 +261,10 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   }else{
     return false;
   }
+
+  // Both Rn or Rm could be the base
+  if (requirePrivilege(base_MO->getReg()) || requirePrivilege(offset_MO->getReg()))
+    return false;
 
   unsigned value_reg = value_MO->getReg();
   if(new_inst != INST_NONE) {
@@ -358,6 +380,9 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     return false;
   }
 
+  if (requirePrivilege(base_MO->getReg()))
+    return false;
+
   unsigned value_reg = value_MO->getReg();
   switch (idx_mode) {
   case PRE_IDX: {
@@ -415,6 +440,9 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   unsigned new_inst = INST_NONE;
   int new_inst_imm = 0;
   int offset_imm = 0;
+
+  if (requirePrivilege(base_MO->getReg()))
+    return false;
 
   if (orig_imm < 0) {
     dbgs() << (isStore? "strd" : "ldrd") << " (imm) : imm < 0\n";
