@@ -194,10 +194,9 @@ addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, MachineOperand *reg2,
                  int shift_imm) {
   if(insttype == INST_ADD_REG){
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::tADDrr), dest_reg)
-                   .addReg(ARM::CPSR, RegState::Implicit)
-                   .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
-                   .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0));
+    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrr), dest_reg)
+                                .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
+                                .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0)));
   }else if(insttype == INST_ADD_REG_SHFT){
     // add.w rd, rn, rm lsl #imm
     AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
@@ -231,13 +230,16 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
   if(isRegT1Encoding(Opcode)){
     // LDR<c> <Rt>,[<Rn>,<Rm>]
-    dbgs() << "T1 encoding for " << (isStore? "str" : "ldr") << " (reg) case\n";
+    dbgs() << "T1 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
     new_inst = INST_ADD_REG;
   }else if(isRegT2Encoding(Opcode)){
     // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-    dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg) case\n";
-    new_inst = INST_ADD_REG_SHFT;
+    dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
     shift_imm = MI.getOperand(3).getImm();
+    if (shift_imm == 0)
+      new_inst = INST_ADD_REG;
+    else
+      new_inst = INST_ADD_REG_SHFT;
   }else{
     return false;
   }
@@ -278,22 +280,27 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
   if(isT1Encoding(Opcode)){
     //Encoding T1 : LDR<c> <Rt>, [<Rn>{,#<imm5>}]
-    dbgs() << "T1 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+    dbgs() << "T1 encoding " << (isStore? "str" : "ldr") << " (imm)\n";
     value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
     offset_imm = transT1Imm(Opcode, MI.getOperand(2).getImm());
   }else if(isT3Encoding(Opcode)){
     //Encoding T3 : LDR<c>.W <Rt>,[<Rn>{,#<imm12>}]
-    dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
     value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
-    new_inst = INST_ADD_IMM;
     new_inst_imm = MI.getOperand(2).getImm();
+    if (new_inst_imm < 256) {
+      offset_imm = new_inst_imm;
+      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset < 256\n";
+    } else {
+      new_inst = INST_ADD_IMM;
+      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
+    }
   }else if(isT4Encoding(Opcode)){
     //Encoding T4 : LDR<c> <Rt>,[<Rn>,#-<imm8>]
     int orig_imm;
     if(isT4PreEncoding(Opcode)){
-      dbgs() << "T4 pre-index encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+      dbgs() << "T4 pre-index encoding " << (isStore? "str" : "ldr") << " (imm)\n";
       if (isStore) {
         value_MO = &MI.getOperand(1);
         idx_reg = MI.getOperand(0).getReg();
@@ -304,8 +311,16 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       base_MO = &MI.getOperand(2);
       orig_imm = MI.getOperand(3).getImm();
       idx_mode = PRE_IDX;
+
+      if (orig_imm < 0) {
+        new_inst = INST_SUB_IMM;
+        new_inst_imm = -orig_imm;
+      } else {
+        new_inst = INST_ADD_IMM;
+        new_inst_imm = orig_imm;
+      }
     }else if(isT4PostEncoding(Opcode)){
-      dbgs() << "T4 post-index encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
+      dbgs() << "T4 post-index encoding " << (isStore? "str" : "ldr") << " (imm)\n";
       if (isStore) {
         value_MO = &MI.getOperand(1);
         idx_reg = MI.getOperand(0).getReg();
@@ -316,19 +331,28 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       base_MO = &MI.getOperand(2);
       orig_imm = MI.getOperand(3).getImm();
       idx_mode = POST_IDX;
+
+      if (orig_imm < 0) {
+        new_inst = INST_SUB_IMM;
+        new_inst_imm = -orig_imm;
+      } else {
+        new_inst = INST_ADD_IMM;
+        new_inst_imm = orig_imm;
+      }
     }else{
-      dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) case\n";
       value_MO = &MI.getOperand(0);
       base_MO = &MI.getOperand(1);
       orig_imm = MI.getOperand(2).getImm();
-    }
 
-    if (orig_imm < 0) {
-      new_inst = INST_SUB_IMM;
-      new_inst_imm = -orig_imm;
-    } else {
-      new_inst = INST_ADD_IMM;
-      new_inst_imm = orig_imm;
+      if (orig_imm < 0) {
+        dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) : imm < 0\n";
+        new_inst = INST_SUB_IMM;
+        new_inst_imm = -orig_imm;
+      } else {
+        dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) : imm >= 0\n";
+        assert(orig_imm < 256);
+        offset_imm = orig_imm;
+      }
     }
   }else{
     return false;
@@ -388,17 +412,23 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   unsigned value2_reg = value2_MO->getReg();
   MachineOperand *base_MO = &MI.getOperand(2);
   int orig_imm = MI.getOperand(3).getImm();
-  unsigned new_inst = INST_SUB_IMM;
+  unsigned new_inst = INST_NONE;
   int new_inst_imm = 0;
   int offset_imm = 0;
 
-  dbgs() << (isStore? "strd" : "ldrd") << " (imm) case\n";
   if (orig_imm < 0) {
+    dbgs() << (isStore? "strd" : "ldrd") << " (imm) : imm < 0\n";
     new_inst = INST_SUB_IMM;
     new_inst_imm = (-orig_imm);
   } else {
-    new_inst = INST_ADD_IMM;
     new_inst_imm = orig_imm;
+    if ((new_inst_imm+4) < 256) {
+      dbgs() << (isStore? "strd" : "ldrd") << " (imm) : imm+4 < 256\n";
+      offset_imm = new_inst_imm;
+    } else {
+      dbgs() << (isStore? "strd" : "ldrd") << " (imm) : imm+4 >= 256\n";
+      new_inst = INST_ADD_IMM;
+    }
   }
 
   if (new_inst != INST_NONE) {
