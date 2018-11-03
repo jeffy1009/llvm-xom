@@ -39,8 +39,7 @@ namespace llvm {
 void initializeARMTestPassPass(PassRegistry &);
 }
 
-#define ARM_TESTPASS_NAME                                       \
-  "ARM test pass"
+#define ARM_TESTPASS_NAME "ARM test pass"
 
 namespace {
   struct ARMTestPass : public MachineFunctionPass{
@@ -76,7 +75,7 @@ namespace {
 
     bool runOnMachineFunction(MachineFunction &Fn) override;
 
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return ARM_TESTPASS_NAME;
     }
 
@@ -84,8 +83,7 @@ namespace {
   char ARMTestPass::ID = 0;
 }
 
-INITIALIZE_PASS(ARMTestPass, "arm-testpass",
-                ARM_TESTPASS_NAME, false, false)
+INITIALIZE_PASS(ARMTestPass, "arm-testpass", ARM_TESTPASS_NAME, false, false)
 
 enum { INST_NONE, INST_ADD_IMM, INST_SUB_IMM, INST_ADD_REG, INST_ADD_REG_SHFT };
 
@@ -212,15 +210,17 @@ addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, MachineOperand *reg2,
                  int shift_imm) {
   if(insttype == INST_ADD_REG){
-    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrr), dest_reg)
-                                .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
-                                .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0)));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrr), dest_reg)
+      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
+      .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0)
+      .add(predOps(ARMCC::AL)).add(condCodeOp());
   }else if(insttype == INST_ADD_REG_SHFT){
     // add.w rd, rn, rm lsl #imm
-    AddDefaultCC(AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
-                                .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
-                                .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0)
-                                .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, shift_imm))));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrs), dest_reg)
+      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0)
+      .addReg(reg2->getReg(), reg2->isKill() ? RegState::Kill : 0)
+      .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, shift_imm))
+      .add(predOps(ARMCC::AL)).add(condCodeOp());
   }
 }
 
@@ -228,11 +228,13 @@ void ARMTestPass::
 addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, int imm) {
   if(insttype == INST_ADD_IMM){
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
-                   .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
+      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+      .add(predOps(ARMCC::AL));
   }else if(insttype == INST_SUB_IMM){
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
-                   .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
+      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+      .add(predOps(ARMCC::AL));
   }
 }
 
@@ -270,18 +272,17 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   if(new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value_reg,
-                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(tmp_reg, RegState::Kill).addImm(0));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value_reg,
+              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(tmp_reg, RegState::Kill).addImm(0)
+      .add(predOps(ARMCC::AL));
   } else {
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value_reg,
-                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                   .addImm(0));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value_reg,
+              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(0)
+      .add(predOps(ARMCC::AL));
   }
 
   return true;
@@ -387,39 +388,37 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   switch (idx_mode) {
   case PRE_IDX: {
     addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value_reg,
-                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(idx_reg).addImm(offset_imm));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value_reg,
+              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(idx_reg).addImm(offset_imm)
+      .add(predOps(ARMCC::AL));
     break;
   }
   case POST_IDX: {
     addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value_reg,
-                           isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                   .addImm(offset_imm));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value_reg,
+              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm)
+      .add(predOps(ARMCC::AL));
     break;
   }
   case NO_IDX: {
     if (new_inst != INST_NONE) {
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
       addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                     .addReg(value_reg,
-                             isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                             : RegState::Define)
-                     .addReg(tmp_reg, RegState::Kill).addImm(offset_imm));
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+        .addReg(value_reg,
+                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+        .addReg(tmp_reg, RegState::Kill).addImm(offset_imm)
+        .add(predOps(ARMCC::AL));
     } else {
-      AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                     .addReg(value_reg,
-                             isStore? (value_MO->isKill() ? RegState::Kill : 0)
-                             : RegState::Define)
-                     .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                     .addImm(offset_imm));
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+        .addReg(value_reg,
+                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+        .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm)
+        .add(predOps(ARMCC::AL));
     }
     break;
   }
@@ -462,29 +461,27 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   if (new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value1_reg,
-                           isStore? (value1_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(tmp_reg).addImm(offset_imm));
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value2_reg,
-                           isStore? (value2_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(tmp_reg, RegState::Kill).addImm(offset_imm+4));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value1_reg,
+              isStore? (value1_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(tmp_reg).addImm(offset_imm)
+      .add(predOps(ARMCC::AL));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value2_reg,
+              isStore? (value2_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(tmp_reg, RegState::Kill).addImm(offset_imm+4)
+      .add(predOps(ARMCC::AL));
   } else {
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value1_reg,
-                           isStore? (value1_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                   .addImm(offset_imm));
-    AddDefaultPred(BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-                   .addReg(value2_reg,
-                           isStore? (value2_MO->isKill() ? RegState::Kill : 0)
-                           : RegState::Define)
-                   .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0)
-                   .addImm(offset_imm+4));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value1_reg,
+              isStore? (value1_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm)
+      .add(predOps(ARMCC::AL));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value2_reg,
+              isStore? (value2_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm+4)
+      .add(predOps(ARMCC::AL));
   }
 
   return true;
