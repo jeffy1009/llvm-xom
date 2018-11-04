@@ -175,20 +175,6 @@ static bool isT4PostEncoding(unsigned Opcode){
   }
 }
 
-static unsigned transT1Imm(unsigned Opcode, int imm){
-  switch(Opcode){
-  case ARM::tLDRi:
-    imm = imm << 2;
-    break;
-  case ARM::tLDRHi:
-    imm = imm << 1;
-    break;
-  case ARM::tLDRBi:
-    break;
-  }
-  return imm;
-}
-
 bool ARMTestPass::requirePrivilege(unsigned Reg) {
   // passed as an argument to or returned from a function
   if (TargetRegisterInfo::isPhysicalRegister(Reg))
@@ -269,6 +255,7 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   int shift_imm = 0;
 
   if(isRegT1Encoding(Opcode)){
+    assert(0 && "error: must verify T1 encoding handling");
     // LDR<c> <Rt>,[<Rn>,<Rm>]
     dbgs() << "T1 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
     new_inst = INST_ADD_REG;
@@ -322,11 +309,12 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   unsigned idx_mode = NO_IDX;
 
   if(isT1Encoding(Opcode)){
+    assert(0 && "error: must verify T1 encoding handling");
     //Encoding T1 : LDR<c> <Rt>, [<Rn>{,#<imm5>}]
     dbgs() << "T1 encoding " << (isStore? "str" : "ldr") << " (imm)\n";
     value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
-    offset_imm = transT1Imm(Opcode, MI.getOperand(2).getImm());
+    offset_imm = MI.getOperand(2).getImm();
   }else if(isT3Encoding(Opcode)){
     //Encoding T3 : LDR<c>.W <Rt>,[<Rn>{,#<imm12>}]
     value_MO = &MI.getOperand(0);
@@ -511,8 +499,6 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
     //LDR (immediate)
-  case ARM::tLDRi:          //checked
-    //  case ARM::tLDRspi:  //stack base load skip
   case ARM::t2LDRi12:       //checked
   case ARM::t2LDRi8:        //not checked
   case ARM::t2LDR_PRE:
@@ -521,12 +507,10 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
 
     //LDR (literal) skip
     //LDR (register)
-  case ARM::tLDRr:
   case ARM::t2LDRs:         //instrumented but not checked
     return instReg(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //LDRH (immediate)
-  case ARM::tLDRHi:
   case ARM::t2LDRHi12:
   case ARM::t2LDRHi8:
   case ARM::t2LDRH_PRE:
@@ -536,11 +520,9 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //LDRH (litenal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
-  case ARM::tLDRHr:
     return instReg(Opcode, ARM::t2LDRHT, MI, MFI, false);
 
     //LDRB (immediate)
-  case ARM::tLDRBi:
   case ARM::t2LDRBi12:
   case ARM::t2LDRBi8:
   case ARM::t2LDRB_PRE:
@@ -550,11 +532,9 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //LDRB (literal) skip
     //LDRB (register)
   case ARM::t2LDRBs:
-  case ARM::tLDRBr:
     return instReg(Opcode, ARM::t2LDRBT, MI, MFI, false);
 
     //LDRSH (immediate)
-  case ARM::tLDRSH:               //not used??
   case ARM::t2LDRSHi12:
   case ARM::t2LDRSHi8:
   case ARM::t2LDRSH_PRE:
@@ -567,7 +547,6 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     return instReg(Opcode, ARM::t2LDRSHT, MI, MFI, false);
 
     //LDRSB (immediate)
-  case ARM::tLDRSB:
   case ARM::t2LDRSBi12:
   case ARM::t2LDRSBi8:
   case ARM::t2LDRSB_PRE:
@@ -590,8 +569,6 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     break;
 
     //STR (immediate)
-  case ARM::tSTRi:          //checked
-    //  case ARM::tSTRspi:  //stack base load skip
   case ARM::t2STRi12:       //checked
   case ARM::t2STRi8:        //not checked
   case ARM::t2STR_PRE:
@@ -600,12 +577,10 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
 
     //STR (literal) skip
     //STR (register)
-  case ARM::tSTRr:
   case ARM::t2STRs:         //instrumented but not checked
     return instReg(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //STRH (immediate)
-  case ARM::tSTRHi:
   case ARM::t2STRHi12:
   case ARM::t2STRHi8:
   case ARM::t2STRH_PRE:
@@ -615,11 +590,9 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //STRH (litenal) skip
     //STRH (register)
   case ARM::t2STRHs:
-  case ARM::tSTRHr:
     return instReg(Opcode, ARM::t2STRHT, MI, MFI, true);
 
     //STRB (immediate)
-  case ARM::tSTRBi:
   case ARM::t2STRBi12:
   case ARM::t2STRBi8:
   case ARM::t2STRB_PRE:
@@ -629,7 +602,6 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
     //STRB (literal) skip
     //STRB (register)
   case ARM::t2STRBs:
-  case ARM::tSTRBr:
     return instReg(Opcode, ARM::t2STRBT, MI, MFI, true);
 
     //[TODO] load double, load multiple, float load
