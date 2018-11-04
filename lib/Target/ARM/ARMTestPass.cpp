@@ -238,13 +238,23 @@ void ARMTestPass::
 addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                  unsigned dest_reg, MachineOperand *reg1, int imm) {
   if(insttype == INST_ADD_IMM){
-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
-      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
-      .add(predOps(ARMCC::AL));
+    if (imm < 256)
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri), dest_reg)
+        .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+        .add(predOps(ARMCC::AL)).add(condCodeOp());
+    else
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2ADDri12), dest_reg)
+        .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+        .add(predOps(ARMCC::AL));
   }else if(insttype == INST_SUB_IMM){
-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
-      .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
-      .add(predOps(ARMCC::AL));
+    if (imm < 256)
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri), dest_reg)
+        .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+        .add(predOps(ARMCC::AL)).add(condCodeOp());
+    else
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2SUBri12), dest_reg)
+        .addReg(reg1->getReg(), reg1->isKill() ? RegState::Kill : 0).addImm(imm)
+        .add(predOps(ARMCC::AL));
   }
 }
 
