@@ -190,17 +190,27 @@ static unsigned transT1Imm(unsigned Opcode, int imm){
 }
 
 bool ARMTestPass::requirePrivilege(unsigned Reg) {
-  assert(MRI->hasOneDef(Reg));
+  // passed as an argument to or returned from a function
+  if (TargetRegisterInfo::isPhysicalRegister(Reg))
+    return false;
+  assert(MRI->hasOneDef(Reg) && "Virtual register has multiple defs?");
+
   MachineInstr *MI = &*MRI->def_instr_begin(Reg);
   switch (MI->getOpcode()) {
   case ARM::t2MOVi: case ARM::t2MOVi16: case ARM::t2MOVi32imm:
   case ARM::t2MOVCCi: case ARM::t2MOVCCi32imm: case ARM::t2MOVCCr: {
     if (!MI->getOperand(1).isImm() || (unsigned)MI->getOperand(1).getImm() < 0xe0000000)
       break;
-    dbgs() << "Not instrumented, Privilege required: ";
-    MI->dump();
+    dbgs() << "  Not instrumented, Privilege required.\n";
+    DEBUG(MI->dump());
     return true;
   }
+  case TargetOpcode::COPY:
+    if (MI->getOperand(1).getReg()==ARM::SP)
+      return false;
+    // fall-through
+  case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDri12:
+    return MI->getOperand(1).isReg() && requirePrivilege(MI->getOperand(1).getReg());
   }
   return false;
 }
