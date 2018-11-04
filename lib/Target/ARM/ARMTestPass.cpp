@@ -563,6 +563,11 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRDi8:
     return instLDSTDouble(Opcode, ARM::t2LDRT, MI, MFI, false);
 
+    // Don't need to handle load from constant pool
+  case ARM::t2LDRpci:
+  case ARM::t2LDRpci_pic:
+    return false;
+
     //VLDR
   case ARM::VLDRS:
   case ARM::VLDRD:
