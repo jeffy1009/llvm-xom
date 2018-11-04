@@ -87,42 +87,6 @@ INITIALIZE_PASS(ARMTestPass, "arm-testpass", ARM_TESTPASS_NAME, false, false)
 
 enum { INST_NONE, INST_ADD_IMM, INST_SUB_IMM, INST_ADD_REG, INST_ADD_REG_SHFT };
 
-static bool isRegT1Encoding(unsigned Opcode){
-  switch(Opcode){
-  case ARM::tLDRr: case ARM::tLDRHr: case ARM::tLDRBr:
-  case ARM::tSTRr: case ARM::tSTRHr: case ARM::tSTRBr:
-    return true;
-  default:
-    return false;
-  }
-}
-
-static bool isRegT2Encoding(unsigned Opcode){
-  switch(Opcode){
-  case ARM::t2LDRs: case ARM::t2LDRHs: case ARM::t2LDRBs:
-  case ARM::t2LDRSHs: case ARM::t2LDRSBs:
-  case ARM::t2STRs: case ARM::t2STRHs: case ARM::t2STRBs:
-    return true;
-  default:
-    return false;
-  }
-}
-
-static bool isT1Encoding(unsigned Opcode){
-  switch(Opcode){
-  case ARM::tLDRi: case ARM::tLDRHi: case ARM::tLDRBi:
-  case ARM::tSTRi: case ARM::tSTRHi: case ARM::tSTRBi:
-    return true;
-  default:
-    return false;
-  }
-}
-/*
-static bool isT2Encoding(unsigned Opcode){
-  //currently, we do not consider T2 encoding
-  return false;
-}
-*/
 static bool isT3Encoding(unsigned Opcode){
   switch(Opcode){
   case ARM::t2LDRi12: case ARM::t2LDRHi12: case ARM::t2LDRBi12:
@@ -254,22 +218,13 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   unsigned new_inst = INST_NONE;
   int shift_imm = 0;
 
-  if(isRegT1Encoding(Opcode)){
-    assert(0 && "error: must verify T1 encoding handling");
-    // LDR<c> <Rt>,[<Rn>,<Rm>]
-    dbgs() << "T1 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
+  // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
+  dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
+  shift_imm = MI.getOperand(3).getImm();
+  if (shift_imm == 0)
     new_inst = INST_ADD_REG;
-  }else if(isRegT2Encoding(Opcode)){
-    // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
-    dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
-    shift_imm = MI.getOperand(3).getImm();
-    if (shift_imm == 0)
-      new_inst = INST_ADD_REG;
-    else
-      new_inst = INST_ADD_REG_SHFT;
-  }else{
-    return false;
-  }
+  else
+    new_inst = INST_ADD_REG_SHFT;
 
   // Both Rn or Rm could be the base
   if (requirePrivilege(base_MO->getReg()) || requirePrivilege(offset_MO->getReg()))
@@ -308,14 +263,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   enum { PRE_IDX, POST_IDX, NO_IDX };
   unsigned idx_mode = NO_IDX;
 
-  if(isT1Encoding(Opcode)){
-    assert(0 && "error: must verify T1 encoding handling");
-    //Encoding T1 : LDR<c> <Rt>, [<Rn>{,#<imm5>}]
-    dbgs() << "T1 encoding " << (isStore? "str" : "ldr") << " (imm)\n";
-    value_MO = &MI.getOperand(0);
-    base_MO = &MI.getOperand(1);
-    offset_imm = MI.getOperand(2).getImm();
-  }else if(isT3Encoding(Opcode)){
+  if(isT3Encoding(Opcode)){
     //Encoding T3 : LDR<c>.W <Rt>,[<Rn>{,#<imm12>}]
     value_MO = &MI.getOperand(0);
     base_MO = &MI.getOperand(1);
@@ -327,7 +275,8 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       new_inst = INST_ADD_IMM;
       dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
     }
-  }else if(isT4Encoding(Opcode)){
+  }else {
+    assert(isT4Encoding(Opcode));
     //Encoding T4 : LDR<c> <Rt>,[<Rn>,#-<imm8>]
     int orig_imm;
     if(isT4PreEncoding(Opcode)){
@@ -385,8 +334,6 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         offset_imm = orig_imm;
       }
     }
-  }else{
-    return false;
   }
 
   if (requirePrivilege(base_MO->getReg()))
@@ -499,15 +446,15 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
     //LDR (immediate)
-  case ARM::t2LDRi12:       //checked
-  case ARM::t2LDRi8:        //not checked
+  case ARM::t2LDRi12:
+  case ARM::t2LDRi8:
   case ARM::t2LDR_PRE:
   case ARM::t2LDR_POST:
     return instImm(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //LDR (literal) skip
     //LDR (register)
-  case ARM::t2LDRs:         //instrumented but not checked
+  case ARM::t2LDRs:
     return instReg(Opcode, ARM::t2LDRT, MI, MFI, false);
 
     //LDRH (immediate)
@@ -517,7 +464,7 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRH_POST:
     return instImm(Opcode, ARM::t2LDRHT, MI, MFI, false);
 
-    //LDRH (litenal) skip
+    //LDRH (literal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
     return instReg(Opcode, ARM::t2LDRHT, MI, MFI, false);
@@ -541,7 +488,7 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRSH_POST:
     return instImm(Opcode, ARM::t2LDRSHT, MI, MFI, false);
 
-    //LDRSH (litenal) skip
+    //LDRSH (literal) skip
     //LDRSH (register)
   case ARM::t2LDRSHs:
     return instReg(Opcode, ARM::t2LDRSHT, MI, MFI, false);
@@ -558,7 +505,6 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRSBs:
     return instReg(Opcode, ARM::t2LDRSBT, MI, MFI, false);
 
-    //[TODO] load double, load multiple, float load
     //LDRD
   case ARM::t2LDRDi8:
     return instLDSTDouble(Opcode, ARM::t2LDRT, MI, MFI, false);
@@ -568,21 +514,16 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRpci_pic:
     return false;
 
-    //VLDR
-  case ARM::VLDRS:
-  case ARM::VLDRD:
-    break;
-
     //STR (immediate)
-  case ARM::t2STRi12:       //checked
-  case ARM::t2STRi8:        //not checked
+  case ARM::t2STRi12:
+  case ARM::t2STRi8:
   case ARM::t2STR_PRE:
   case ARM::t2STR_POST:
     return instImm(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //STR (literal) skip
     //STR (register)
-  case ARM::t2STRs:         //instrumented but not checked
+  case ARM::t2STRs:
     return instReg(Opcode, ARM::t2STRT, MI, MFI, true);
 
     //STRH (immediate)
@@ -609,15 +550,10 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRBs:
     return instReg(Opcode, ARM::t2STRBT, MI, MFI, true);
 
-    //[TODO] load double, load multiple, float load
     //STRD
   case ARM::t2STRDi8:
     return instLDSTDouble(Opcode, ARM::t2STRT, MI, MFI, true);
 
-    //VSTR
-  case ARM::VSTRS:
-  case ARM::VSTRD:
-    break;
   default:
     return false;
   }
