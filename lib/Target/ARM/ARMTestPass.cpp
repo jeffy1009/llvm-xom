@@ -215,8 +215,8 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   MachineOperand *base_MO = &MI.getOperand(1);
   MachineOperand *offset_MO = &MI.getOperand(2);
 
-  unsigned new_inst = INST_NONE;
-  int shift_imm = 0;
+  unsigned new_inst;
+  int shift_imm;
 
   // LDR<c>.W <Rt>,[<Rn>,<Rm>{,LSL #<imm2>}]
   dbgs() << "T2 encoding for " << (isStore? "str" : "ldr") << " (reg)\n";
@@ -231,21 +231,13 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     return false;
 
   unsigned value_reg = value_MO->getReg();
-  if(new_inst != INST_NONE) {
-    unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
-    addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-      .addReg(value_reg,
-              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
-      .addReg(tmp_reg, RegState::Kill).addImm(0)
-      .add(predOps(ARMCC::AL));
-  } else {
-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-      .addReg(value_reg,
-              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
-      .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(0)
-      .add(predOps(ARMCC::AL));
-  }
+  unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+  addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
+  BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+    .addReg(value_reg,
+            isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+    .addReg(tmp_reg, RegState::Kill).addImm(0)
+    .add(predOps(ARMCC::AL));
 
   return true;
 }
