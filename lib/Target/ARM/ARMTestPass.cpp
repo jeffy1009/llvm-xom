@@ -35,6 +35,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "arm-testpass"
 
+static cl::opt<bool>
+EnableXOMSFI("xom-sfi-mode", cl::Hidden, cl::ZeroOrMore,
+             cl::desc("use SFI for XOM instrumentation"),
+             cl::init(false));
+
 namespace llvm {
 void initializeARMTestPassPass(PassRegistry &);
 }
@@ -67,6 +72,8 @@ namespace {
 
     bool instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
                  MachineBasicBlock &MFI, bool isStore);
+    bool instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
+                    bool isStore);
     bool instImm(unsigned Opcode, unsigned new_opcode,
                  MachineInstr &MI, MachineBasicBlock &MFI, bool isStore);
     bool instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
@@ -208,6 +215,37 @@ addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
   }
 }
 
+enum { XOM_LD_W, XOM_LD_H, XOM_LD_SH, XOM_LD_B, XOM_LD_SB,
+       XOM_ST_W, XOM_ST_H, XOM_ST_B };
+
+static unsigned getPrivilegedOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case XOM_LD_W:  return ARM::t2LDRT;
+  case XOM_LD_H:  return ARM::t2LDRHT;
+  case XOM_LD_SH: return ARM::t2LDRSHT;
+  case XOM_LD_B:  return ARM::t2LDRBT;
+  case XOM_LD_SB: return ARM::t2LDRSBT;
+  case XOM_ST_W:  return ARM::t2STRT;
+  case XOM_ST_H:  return ARM::t2STRHT;
+  case XOM_ST_B:  return ARM::t2STRBT;
+  default: llvm_unreachable("Unhandled opcode");
+  }
+}
+
+static unsigned getSFIOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case XOM_LD_W:  return ARM::t2LDRi12;
+  case XOM_LD_H:  return ARM::t2LDRHi12;
+  case XOM_LD_SH: return ARM::t2LDRSHi12;
+  case XOM_LD_B:  return ARM::t2LDRBi12;
+  case XOM_LD_SB: return ARM::t2LDRSBi12;
+  case XOM_ST_W:  return ARM::t2STRi12;
+  case XOM_ST_H:  return ARM::t2STRHi12;
+  case XOM_ST_B:  return ARM::t2STRBi12;
+  default: llvm_unreachable("Unhandled opcode");
+  }
+}
+
 bool ARMTestPass::
 instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         MachineBasicBlock &MFI, bool isStore) {
@@ -233,13 +271,62 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   unsigned value_reg = value_MO->getReg();
   unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
   addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
-  BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
-    .addReg(value_reg,
-            isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
-    .addReg(tmp_reg, RegState::Kill).addImm(0)
-    .add(predOps(ARMCC::AL));
+  if (EnableXOMSFI) {
+    unsigned PredReg;
+    assert(getInstrPredicate(MI, PredReg)==ARMCC::AL);
+
+    new_opcode = getSFIOpcode(new_opcode);
+    if (isStore) {
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+        .addReg(tmp_reg).addImm(0xe0000000).add(predOps(ARMCC::AL));
+
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+        .addReg(value_reg,
+                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+        .addReg(tmp_reg, RegState::Kill).addImm(0)
+        .add(predOps(ARMCC::LO)).addReg(ARM::CPSR, RegState::Implicit);
+    } else {
+      // TODO: change 0x80000
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+        .addReg(tmp_reg).addImm(0x80000).add(predOps(ARMCC::AL));
+
+      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+        .addReg(value_reg,
+                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+        .addReg(tmp_reg, RegState::Kill).addImm(0)
+        .add(predOps(ARMCC::HS)).addReg(ARM::CPSR, RegState::Implicit);
+    }
+  } else {
+    new_opcode = getPrivilegedOpcode(new_opcode);
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+      .addReg(value_reg,
+              isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+      .addReg(tmp_reg, RegState::Kill).addImm(0)
+      .add(predOps(ARMCC::AL));
+  }
 
   return true;
+}
+
+bool ARMTestPass::
+instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
+           bool isStore) {
+  unsigned PredReg;
+  assert(getInstrPredicate(MI, PredReg)==ARMCC::AL);
+
+  if (isStore) {
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+      .addReg(base_reg).addImm(0xe0000000).add(predOps(ARMCC::AL));
+    MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::LO);
+  } else {
+    // TODO: change 0x80000
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+      .addReg(base_reg).addImm(0x80000).add(predOps(ARMCC::AL));
+    MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::HS);
+  }
+  MI.addOperand(MachineOperand::CreateReg(ARM::CPSR, /* isDef= */ false,
+                                          /* isImp= */ true));
+  return false; // don't erase the MI
 }
 
 bool ARMTestPass::
@@ -331,7 +418,11 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   if (requirePrivilege(base_MO->getReg()))
     return false;
 
+  if (EnableXOMSFI)
+    return instImmSFI(MI, MFI, base_MO->getReg(), isStore);
+
   unsigned value_reg = value_MO->getReg();
+  new_opcode = getPrivilegedOpcode(new_opcode);
   switch (idx_mode) {
   case PRE_IDX: {
     addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
@@ -405,6 +496,10 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     }
   }
 
+  if (EnableXOMSFI)
+    return instImmSFI(MI, MFI, base_MO->getReg(), isStore);
+
+  new_opcode = getPrivilegedOpcode(new_opcode);
   if (new_inst != INST_NONE) {
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
@@ -442,64 +537,64 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2LDRi8:
   case ARM::t2LDR_PRE:
   case ARM::t2LDR_POST:
-    return instImm(Opcode, ARM::t2LDRT, MI, MFI, false);
+    return instImm(Opcode, XOM_LD_W, MI, MFI, false);
 
     //LDR (literal) skip
     //LDR (register)
   case ARM::t2LDRs:
-    return instReg(Opcode, ARM::t2LDRT, MI, MFI, false);
+    return instReg(Opcode, XOM_LD_W, MI, MFI, false);
 
     //LDRH (immediate)
   case ARM::t2LDRHi12:
   case ARM::t2LDRHi8:
   case ARM::t2LDRH_PRE:
   case ARM::t2LDRH_POST:
-    return instImm(Opcode, ARM::t2LDRHT, MI, MFI, false);
+    return instImm(Opcode, XOM_LD_H, MI, MFI, false);
 
     //LDRH (literal) skip
     //LDRH (register)
   case ARM::t2LDRHs:
-    return instReg(Opcode, ARM::t2LDRHT, MI, MFI, false);
+    return instReg(Opcode, XOM_LD_H, MI, MFI, false);
 
     //LDRB (immediate)
   case ARM::t2LDRBi12:
   case ARM::t2LDRBi8:
   case ARM::t2LDRB_PRE:
   case ARM::t2LDRB_POST:
-    return instImm(Opcode, ARM::t2LDRBT, MI, MFI, false);
+    return instImm(Opcode, XOM_LD_B, MI, MFI, false);
 
     //LDRB (literal) skip
     //LDRB (register)
   case ARM::t2LDRBs:
-    return instReg(Opcode, ARM::t2LDRBT, MI, MFI, false);
+    return instReg(Opcode, XOM_LD_B, MI, MFI, false);
 
     //LDRSH (immediate)
   case ARM::t2LDRSHi12:
   case ARM::t2LDRSHi8:
   case ARM::t2LDRSH_PRE:
   case ARM::t2LDRSH_POST:
-    return instImm(Opcode, ARM::t2LDRSHT, MI, MFI, false);
+    return instImm(Opcode, XOM_LD_SH, MI, MFI, false);
 
     //LDRSH (literal) skip
     //LDRSH (register)
   case ARM::t2LDRSHs:
-    return instReg(Opcode, ARM::t2LDRSHT, MI, MFI, false);
+    return instReg(Opcode, XOM_LD_SH, MI, MFI, false);
 
     //LDRSB (immediate)
   case ARM::t2LDRSBi12:
   case ARM::t2LDRSBi8:
   case ARM::t2LDRSB_PRE:
   case ARM::t2LDRSB_POST:
-    return instImm(Opcode, ARM::t2LDRSBT, MI, MFI, false);
+    return instImm(Opcode, XOM_LD_SB, MI, MFI, false);
 
     //LDRSB (literal) skip
     //LDRSB (register)
   case ARM::t2LDRSBs:
-    return instReg(Opcode, ARM::t2LDRSBT, MI, MFI, false);
+    return instReg(Opcode, XOM_LD_SB, MI, MFI, false);
 
     //LDRD
   case ARM::t2LDRDi8:
-    return instLDSTDouble(Opcode, ARM::t2LDRT, MI, MFI, false);
+    return instLDSTDouble(Opcode, XOM_LD_W, MI, MFI, false);
 
     // Don't need to handle load from constant pool
   case ARM::t2LDRpci:
@@ -511,40 +606,40 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRi8:
   case ARM::t2STR_PRE:
   case ARM::t2STR_POST:
-    return instImm(Opcode, ARM::t2STRT, MI, MFI, true);
+    return instImm(Opcode, XOM_ST_W, MI, MFI, true);
 
     //STR (literal) skip
     //STR (register)
   case ARM::t2STRs:
-    return instReg(Opcode, ARM::t2STRT, MI, MFI, true);
+    return instReg(Opcode, XOM_ST_W, MI, MFI, true);
 
     //STRH (immediate)
   case ARM::t2STRHi12:
   case ARM::t2STRHi8:
   case ARM::t2STRH_PRE:
   case ARM::t2STRH_POST:
-    return instImm(Opcode, ARM::t2STRHT, MI, MFI, true);
+    return instImm(Opcode, XOM_ST_H, MI, MFI, true);
 
     //STRH (litenal) skip
     //STRH (register)
   case ARM::t2STRHs:
-    return instReg(Opcode, ARM::t2STRHT, MI, MFI, true);
+    return instReg(Opcode, XOM_ST_H, MI, MFI, true);
 
     //STRB (immediate)
   case ARM::t2STRBi12:
   case ARM::t2STRBi8:
   case ARM::t2STRB_PRE:
   case ARM::t2STRB_POST:
-    return instImm(Opcode, ARM::t2STRBT, MI, MFI, true);
+    return instImm(Opcode, XOM_ST_B, MI, MFI, true);
 
     //STRB (literal) skip
     //STRB (register)
   case ARM::t2STRBs:
-    return instReg(Opcode, ARM::t2STRBT, MI, MFI, true);
+    return instReg(Opcode, XOM_ST_B, MI, MFI, true);
 
     //STRD
   case ARM::t2STRDi8:
-    return instLDSTDouble(Opcode, ARM::t2STRT, MI, MFI, true);
+    return instLDSTDouble(Opcode, XOM_ST_W, MI, MFI, true);
 
   default:
     return false;
