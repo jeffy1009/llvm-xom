@@ -403,15 +403,10 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       base_MO = &MI.getOperand(1);
       orig_imm = MI.getOperand(2).getImm();
 
-      if (orig_imm < 0) {
-        dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) : imm < 0\n";
-        new_inst = INST_SUB_IMM;
-        new_inst_imm = -orig_imm;
-      } else {
-        dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) : imm >= 0\n";
-        assert(orig_imm < 256);
-        offset_imm = orig_imm;
-      }
+      assert(orig_imm < 0 && "T4 normal encoding must have negative offset");
+      dbgs() << "T4 encoding " << (isStore? "str" : "ldr") << " (imm) : imm < 0\n";
+      new_inst = INST_SUB_IMM;
+      new_inst_imm = -orig_imm;
     }
   }
 
