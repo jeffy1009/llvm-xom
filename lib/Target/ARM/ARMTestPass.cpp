@@ -246,6 +246,9 @@ static unsigned getSFIOpcode(unsigned Opcode) {
   }
 }
 
+#define LD_BOUNDARY 0x80000
+#define ST_BOUNDARY 0xe0000000
+
 bool ARMTestPass::
 instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         MachineBasicBlock &MFI, bool isStore) {
@@ -278,7 +281,7 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     new_opcode = getSFIOpcode(new_opcode);
     if (isStore) {
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
-        .addReg(tmp_reg).addImm(0xe0000000).add(predOps(ARMCC::AL));
+        .addReg(tmp_reg).addImm(ST_BOUNDARY).add(predOps(ARMCC::AL));
 
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
         .addReg(value_reg,
@@ -286,9 +289,8 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         .addReg(tmp_reg, RegState::Kill).addImm(0)
         .add(predOps(ARMCC::LO)).addReg(ARM::CPSR, RegState::Implicit);
     } else {
-      // TODO: change 0x80000
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
-        .addReg(tmp_reg).addImm(0x80000).add(predOps(ARMCC::AL));
+        .addReg(tmp_reg).addImm(LD_BOUNDARY).add(predOps(ARMCC::AL));
 
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
         .addReg(value_reg,
@@ -316,12 +318,11 @@ instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
 
   if (isStore) {
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
-      .addReg(base_reg).addImm(0xe0000000).add(predOps(ARMCC::AL));
+      .addReg(base_reg).addImm(ST_BOUNDARY).add(predOps(ARMCC::AL));
     MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::LO);
   } else {
-    // TODO: change 0x80000
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
-      .addReg(base_reg).addImm(0x80000).add(predOps(ARMCC::AL));
+      .addReg(base_reg).addImm(LD_BOUNDARY).add(predOps(ARMCC::AL));
     MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::HS);
   }
   MI.addOperand(MachineOperand::CreateReg(ARM::CPSR, /* isDef= */ false,
