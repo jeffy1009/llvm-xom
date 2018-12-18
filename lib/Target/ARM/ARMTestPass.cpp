@@ -637,8 +637,53 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2STRDi8:
     return instLDSTDouble(Opcode, XOM_ST_W, MI, MFI, true);
 
-  default:
+  case TargetOpcode::DBG_VALUE: case TargetOpcode::COPY: case TargetOpcode::IMPLICIT_DEF:
+  case TargetOpcode::INLINEASM:
+
+  case ARM::ADJCALLSTACKUP: case ARM::ADJCALLSTACKDOWN: case ARM::PHI: case ARM::MEMCPY:
+  case ARM::tPICADD:
+
+  case ARM::t2MOVi: case ARM::t2MOVi16: case ARM::t2MOVi32imm:
+  case ARM::t2MOVsrl_flag: case ARM::t2MOVsra_flag:
+  case ARM::t2MOVCCi: case ARM::t2MOVCCi16: case ARM::t2MOVCCi32imm: case ARM::t2MOVCCr:
+  case ARM::t2MOVCCasr: case ARM::t2MOVCClsl: case ARM::t2MOVCClsr:
+  case ARM::t2MVNi: case ARM::t2MVNr: case ARM::t2MVNCCi:
+  case ARM::t2LEApcrelJT:
+  case ARM::t2SXTH: case ARM::t2SXTB: case ARM::t2UXTH: case ARM::t2UXTB:
+  case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDrs: case ARM::t2ADDri12:
+  case ARM::t2ADCri: case ARM::t2ADCrr: case ARM::t2ADCrs:
+  case ARM::t2SUBri: case ARM::t2SUBrr: case ARM::t2SUBrs: case ARM::t2SUBri12:
+  case ARM::t2SBCri: case ARM::t2SBCrr: case ARM::t2SBCrs:
+  case ARM::t2RSBri: case ARM::t2RSBrs:
+  case ARM::t2MUL: case ARM::t2MLA: case ARM::t2MLS:
+  case ARM::t2SMLAL: case ARM::t2SMULL: case ARM::t2UMLAL: case ARM::t2UMULL:
+  case ARM::t2SDIV: case ARM::t2UDIV:
+  case ARM::t2ANDri: case ARM::t2ANDrr: case ARM::t2ANDrs:
+  case ARM::t2ORRri: case ARM::t2ORRrr: case ARM::t2ORRrs:
+  case ARM::t2ORNri: case ARM::t2ORNrr:
+  case ARM::t2EORrr: case ARM::t2EORri: case ARM::t2EORrs:
+  case ARM::t2ASRri: case ARM::t2ASRrr:
+  case ARM::t2LSLri: case ARM::t2LSLrr: case ARM::t2LSRri: case ARM::t2LSRrr:
+  case ARM::t2RORri: case ARM::t2RORrr: case ARM::t2RRX:
+  case ARM::t2BICrr: case ARM::t2BICri: case ARM::t2BICrs: case ARM::t2BFC: case ARM::t2BFI:
+  case ARM::t2SBFX: case ARM::t2UBFX:
+  case ARM::t2CLZ:
+  case ARM::t2RBIT: case ARM::t2REV: case ARM::t2REV16:
+
+  case ARM::t2CMNri: case ARM::t2CMNzrr:
+  case ARM::t2CMPri: case ARM::t2CMPrr: case ARM::t2CMPrs:
+  case ARM::t2TSTri: case ARM::t2TSTrr: case ARM::t2TSTrs:
+  case ARM::t2TEQri: case ARM::t2TEQrr: case ARM::t2TEQrs:
+  case ARM::tBL: case ARM::tBLXr: case ARM::tBX_RET:
+  case ARM::t2B: case ARM::t2Bcc: case ARM::t2BR_JT:
+  case ARM::TCRETURNdi: case ARM::TCRETURNri:
     return false;
+
+  default: {
+    dbgs() << "warning: unhandled opcode " <<  TII->getName(MI.getOpcode()) << '\n';
+    assert(0);
+    return false;
+  }
   }
   return false;
 }
