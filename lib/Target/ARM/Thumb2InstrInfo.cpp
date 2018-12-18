@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrDesc.h"
@@ -38,6 +39,8 @@ static cl::opt<bool>
 OldT2IfCvt("old-thumb2-ifcvt", cl::Hidden,
            cl::desc("Use old-style Thumb2 if-conversion heuristics"),
            cl::init(false));
+
+extern cl::opt<bool> EnableXOMInst;
 
 Thumb2InstrInfo::Thumb2InstrInfo(const ARMSubtarget &STI)
     : ARMBaseInstrInfo(STI) {}
@@ -473,6 +476,29 @@ immediateOffsetOpcode(unsigned opcode)
   return 0;
 }
 
+static unsigned getPrivilegedOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case ARM::t2LDRi12: case ARM::t2LDRi8:
+    return ARM::t2LDRT;
+  case ARM::t2LDRHi12: case ARM::t2LDRHi8:
+    return ARM::t2LDRHT;
+  case ARM::t2LDRBi12: case ARM::t2LDRBi8:
+    return ARM::t2LDRBT;
+  case ARM::t2LDRSHi12: case ARM::t2LDRSHi8:
+    return ARM::t2LDRSHT;
+  case ARM::t2LDRSBi12: case ARM::t2LDRSBi8:
+    return ARM::t2LDRSBT;
+  case ARM::t2STRi12: case ARM::t2STRi8:
+    return ARM::t2STRT;
+  case ARM::t2STRHi12: case ARM::t2STRHi8:
+    return ARM::t2STRHT;
+  case ARM::t2STRBi12: case ARM::t2STRBi8:
+    return ARM::t2STRBT;
+  default: llvm_unreachable("Unhandled opcode");
+  }
+  assert(0);
+}
+
 bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
                                unsigned FrameReg, int &Offset,
                                const ARMBaseInstrInfo &TII) {
@@ -613,27 +639,64 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
     if (NewOpc != Opcode)
       MI.setDesc(TII.get(NewOpc));
 
+    MachineFunction &MF = *MI.getParent()->getParent();
+    MachineRegisterInfo *MRI = &MF.getRegInfo();
+    if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP) {
+      dbgs() << "Frame Access using register other than SP. Opcode:" << NewOpc << '\n';
+      NumBits = 8;
+    }
+
     MachineOperand &ImmOp = MI.getOperand(FrameRegIdx+1);
 
     // Attempt to fold address computation
     // Common case: small offset, fits into instruction.
     int ImmedOffset = Offset / Scale;
     unsigned Mask = (1 << NumBits) - 1;
+    bool Success = true;
     if ((unsigned)Offset <= Mask * Scale) {
       // Replace the FrameIndex with fp/sp
       MI.getOperand(FrameRegIdx).ChangeToRegister(FrameReg, false);
       if (isSub) {
-        if (AddrMode == ARMII::AddrMode5)
+        if (AddrMode == ARMII::AddrMode5) {
+          assert(FrameReg == ARM::SP);
           // FIXME: Not consistent.
           ImmedOffset |= 1 << NumBits;
-        else
-          ImmedOffset = -ImmedOffset;
+        } else {
+          if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP) {
+            RegScavenger RS;
+            RS.enterBasicBlock(*MI.getParent());
+            RS.forward(MI);
+            RS.backward();
+            BitVector Available = RS.getRegsAvailable(&ARM::GPRRegClass);
+            signed AvailReg = Available.find_first();
+            if (AvailReg == -1) {
+              // TODO: handle this case
+              dbgs() << "No available registers\n";
+              ImmedOffset = -ImmedOffset;
+              Success = false;
+            } else {
+              MachineOperand &AddrMO = MI.getOperand(1);
+              BuildMI(*MI.getParent(), &MI, MI.getDebugLoc(), TII.get(ARM::t2SUBri), AvailReg)
+                .addReg(AddrMO.getReg(), AddrMO.isKill() ? RegState::Kill : 0).addImm(ImmedOffset)
+                .add(predOps(ARMCC::AL)).add(condCodeOp());
+              MI.getOperand(FrameRegIdx).ChangeToRegister(AvailReg,
+                                                          /*IsDef=*/false, /*IsImp*/false,
+                                                          /*IsKill=*/true);
+              ImmedOffset = 0;
+            }
+          } else {
+            ImmedOffset = -ImmedOffset;
+          }
+        }
+      }
+      if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP && Success) {
+        MI.setDesc(TII.get(getPrivilegedOpcode(NewOpc)));
       }
       ImmOp.ChangeToImmediate(ImmedOffset);
       Offset = 0;
       return true;
     }
-
+    assert(FrameReg == ARM::SP);
     // Otherwise, offset doesn't fit. Pull in what we can to simplify
     ImmedOffset = ImmedOffset & Mask;
     if (isSub) {
