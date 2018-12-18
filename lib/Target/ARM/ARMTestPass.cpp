@@ -703,6 +703,8 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   // MF  = &Fn;
 
   bool Modified = false;
+  if(Fn.getName().compare(StringRef("__sfputc_r")) == 0)
+    return Modified;
 
   for (MachineBasicBlock &MFI : Fn) {
     /*
