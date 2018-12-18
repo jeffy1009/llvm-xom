@@ -333,6 +333,11 @@ instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
 bool ARMTestPass::
 instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         MachineBasicBlock &MFI, bool isStore) {
+  if (!MI.getOperand(1).isReg()) {
+    assert(MI.getOperand(1).isFI());
+    return false;
+  }
+
   MachineOperand *value_MO;
   unsigned idx_reg = -1; // pre/post index
   MachineOperand *base_MO;
