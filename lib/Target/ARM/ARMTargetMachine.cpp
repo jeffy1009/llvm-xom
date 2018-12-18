@@ -74,6 +74,11 @@ static cl::opt<cl::boolOrDefault>
 EnableGlobalMerge("arm-global-merge", cl::Hidden,
                   cl::desc("Enable the global merge pass"));
 
+cl::opt<bool>
+EnableXOMInst("enable-xom-inst", cl::Hidden, cl::ZeroOrMore,
+              cl::desc("Enable XOM instrumentation"),
+              cl::init(false));
+
 namespace llvm {
   void initializeARMExecutionDepsFixPass(PassRegistry&);
 }
@@ -440,6 +445,8 @@ void ARMPassConfig::addPreRegAlloc() {
     if (!DisableA15SDOptimization)
       addPass(createA15SDOptimizerPass());
   }
+
+  if (EnableXOMInst)
     addPass(createARMTestPassPass());
 }
 
