@@ -62,7 +62,8 @@ namespace {
 
 	int count = 0;
 
-    bool requirePrivilege(unsigned Reg);
+    // IsVariable: load/store address is not fixed
+    bool requirePrivilege(unsigned Reg, MachineInstr *&DefMI, bool &IsVariable);
 
     void addOffsetInstReg(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                           unsigned dest_reg, MachineOperand *reg1, MachineOperand *reg2,
@@ -70,6 +71,9 @@ namespace {
     void addOffsetInstImm(MachineInstr &MI, MachineBasicBlock &MFI, unsigned insttype,
                           unsigned dest_reg, MachineOperand *reg1, int imm);
 
+    void instChecks(MachineBasicBlock &MFI, MachineInstr &MI, MachineInstr *DefMI,
+                    unsigned new_opcode, bool isStore);
+    void instPostCheck(MachineBasicBlock &MFI, MachineBasicBlock::iterator MI);
     bool instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
                  MachineBasicBlock &MFI, bool isStore);
     bool instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
@@ -146,7 +150,9 @@ static bool isT4PostEncoding(unsigned Opcode){
   }
 }
 
-bool ARMTestPass::requirePrivilege(unsigned Reg) {
+#define SPECIAL_REG ARM::SP
+
+bool ARMTestPass::requirePrivilege(unsigned Reg, MachineInstr *&DefMI, bool &IsVariable) {
   // passed as an argument to or returned from a function
   if (TargetRegisterInfo::isPhysicalRegister(Reg))
     return false;
@@ -159,15 +165,20 @@ bool ARMTestPass::requirePrivilege(unsigned Reg) {
     if (!MI->getOperand(1).isImm() || (unsigned)MI->getOperand(1).getImm() < 0xe0000000)
       break;
     dbgs() << "  Not instrumented, Privilege required.\n";
+    DefMI = MI;
     DEBUG(MI->dump());
     return true;
   }
-  case TargetOpcode::COPY:
-    if (MI->getOperand(1).getReg()==ARM::SP)
+  case TargetOpcode::COPY: {
+    if (MI->getOperand(1).getReg()==SPECIAL_REG)
       return false;
-    // fall-through
-  case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDri12:
-    return MI->getOperand(1).isReg() && requirePrivilege(MI->getOperand(1).getReg());
+    return MI->getOperand(1).isReg() && requirePrivilege(MI->getOperand(1).getReg(), DefMI, IsVariable);
+  }
+  case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDri12: {
+    if (MI->getOperand(2).isReg())
+      IsVariable = true;
+    return MI->getOperand(1).isReg() && requirePrivilege(MI->getOperand(1).getReg(), DefMI, IsVariable);
+  }
   }
   return false;
 }
@@ -246,8 +257,55 @@ static unsigned getSFIOpcode(unsigned Opcode) {
   }
 }
 
+#define SCS_START 0xe0000000
 #define LD_BOUNDARY 0x80000
-#define ST_BOUNDARY 0xe0000000
+#define ST_BOUNDARY SCS_START
+
+void ARMTestPass::
+instChecks(MachineBasicBlock &MFI, MachineInstr &MI, MachineInstr *DefMI,
+           unsigned new_opcode, bool isStore) {
+#define MPU_START 0xE000ED90
+#define MPU_END   0xE000EDEF
+#define VTOR_ADDR 0xE000ED08
+
+  if (isStore) {
+    unsigned mpu_start = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    unsigned mpu_end = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi32imm), mpu_start)
+      .addImm(MPU_START);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi32imm), mpu_end)
+      .addImm(MPU_END);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::XOM_CHECK_ADDR_MPU))
+      .addReg(mpu_start).addReg(mpu_end);
+    unsigned vtor_addr = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi32imm), vtor_addr)
+      .addImm(VTOR_ADDR);
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPrr))
+      .addReg(SPECIAL_REG).addReg(vtor_addr).add(predOps(ARMCC::AL));
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi), SPECIAL_REG)
+      .addImm(0).add(predOps(ARMCC::EQ)).addReg(ARM::CPSR, RegState::Implicit);
+  } else {
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+      .addReg(SPECIAL_REG).addImm(SCS_START).add(predOps(ARMCC::AL));
+    // TODO: currently SP is set to zero if checking fails.
+    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi), SPECIAL_REG)
+      .addImm(0).add(predOps(ARMCC::LO)).addReg(ARM::CPSR, RegState::Implicit);
+  }
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(getSFIOpcode(new_opcode)))
+    .add(MI.getOperand(0))
+    .addReg(SPECIAL_REG).addImm(0).add(predOps(ARMCC::AL));
+}
+
+void ARMTestPass::instPostCheck(MachineBasicBlock &MFI, MachineBasicBlock::iterator MI) {
+  BuildMI(MFI, MI, DebugLoc(), TII->get(ARM::t2CMPri))
+    .addReg(SPECIAL_REG).addImm(0x20000000).add(predOps(ARMCC::AL));
+  BuildMI(MFI, MI, DebugLoc(), TII->get(ARM::t2MOVi), SPECIAL_REG)
+    .addImm(0).add(predOps(ARMCC::LO)).addReg(ARM::CPSR, RegState::Implicit);
+  BuildMI(MFI, MI, DebugLoc(), TII->get(ARM::t2CMPri))
+    .addReg(SPECIAL_REG).addImm(0x40000000).add(predOps(ARMCC::AL));
+  BuildMI(MFI, MI, DebugLoc(), TII->get(ARM::t2MOVi), SPECIAL_REG)
+    .addImm(0).add(predOps(ARMCC::HS)).addReg(ARM::CPSR, RegState::Implicit);
+}
 
 bool ARMTestPass::
 instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
@@ -268,8 +326,29 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     new_inst = INST_ADD_REG_SHFT;
 
   // Both Rn or Rm could be the base
-  if (requirePrivilege(base_MO->getReg()) || requirePrivilege(offset_MO->getReg()))
+  MachineInstr *DefMI;
+  bool IsVariable = false;
+  if (requirePrivilege(base_MO->getReg(), DefMI, IsVariable)
+      || requirePrivilege(offset_MO->getReg(), DefMI, IsVariable)) {
+    if (EnableXOMSFI)
+      return false;
+
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::tCPSI))
+      .addImm(1).addImm(1);
+    unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), tmp_reg)
+      .addReg(SPECIAL_REG);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::t2ADDrr), SPECIAL_REG)
+      .add(MI.getOperand(1)).add(MI.getOperand(2)).add(predOps(ARMCC::AL)).add(condCodeOp());
+    instChecks(MFI, MI, DefMI, new_opcode, isStore);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), SPECIAL_REG)
+      .addReg(tmp_reg);
+    instPostCheck(*MI.getParent(), &MI);
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::tCPSI))
+      .addImm(0).addImm(1);
+    MI.eraseFromParent();
     return false;
+  }
 
   unsigned value_reg = value_MO->getReg();
   unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
@@ -416,8 +495,106 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     }
   }
 
-  if (requirePrivilege(base_MO->getReg()))
+  MachineInstr *DefMI;
+  unsigned base_reg = base_MO->getReg();
+  // load/store that is already converted to use SP
+  if (!EnableXOMSFI && base_reg==SPECIAL_REG)
     return false;
+
+  bool IsVariable = false;
+  if (requirePrivilege(base_reg, DefMI, IsVariable)) {
+    if (EnableXOMSFI)
+      return false;
+
+    if (IsVariable) {
+      MachineInstr *Addr = &*MRI->def_instr_begin(base_reg);
+      BuildMI(*Addr->getParent(), Addr, Addr->getDebugLoc(), TII->get(ARM::tCPSI))
+        .addImm(1).addImm(1);
+      unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+      BuildMI(*Addr->getParent(), Addr, Addr->getDebugLoc(), TII->get(TargetOpcode::COPY), tmp_reg)
+        .addReg(SPECIAL_REG);
+      Addr->getOperand(0).setReg(SPECIAL_REG);
+      instChecks(MFI, MI, DefMI, new_opcode, isStore);
+      BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), SPECIAL_REG)
+        .addReg(tmp_reg);
+      instPostCheck(*MI.getParent(), &MI);
+      BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::tCPSI))
+        .addImm(0).addImm(1);
+      MI.eraseFromParent();
+      return false;
+    }
+
+    unsigned OrigVReg = DefMI->getOperand(0).getReg();
+    unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
+    if (DefMI->getParent() != &MFI) {
+      BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::tCPSI))
+        .addImm(1).addImm(1);
+      BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), tmp_reg)
+        .addReg(SPECIAL_REG);
+      BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(ARM::t2MOVi32imm), SPECIAL_REG)
+        .addImm(DefMI->getOperand(1).getImm());
+    } else {
+      BuildMI(*DefMI->getParent(), DefMI, DefMI->getDebugLoc(), TII->get(ARM::tCPSI))
+        .addImm(1).addImm(1);
+      BuildMI(*DefMI->getParent(), DefMI, DefMI->getDebugLoc(), TII->get(TargetOpcode::COPY), tmp_reg)
+        .addReg(SPECIAL_REG);
+      DefMI->getOperand(0).setReg(SPECIAL_REG);
+    }
+    SmallVector<MachineInstr *, 4> UseMIs;
+    MachineInstr *LastUseMI;
+    MachineInstr *UseMIInOtherBB = NULL;
+    MachineInstr *CopyMI = NULL;
+    for (MachineRegisterInfo::use_instr_iterator
+           UI = MRI->use_instr_begin(base_reg), UE = MRI->use_instr_end();
+         UI != UE; ++UI) {
+      MachineInstr *UseMI = &*UI;
+      if (UseMI->getOpcode() == TargetOpcode::COPY) {
+        assert(!CopyMI);
+        CopyMI = UseMI;
+        continue;
+      }
+      if (UseMI->getParent() != &MFI) {
+        // Only keep the first one encountered
+        if (!UseMIInOtherBB)
+          UseMIInOtherBB = UseMI;
+        continue;
+      }
+      assert(isT3Encoding(UseMI->getOpcode()) || isT4Encoding(UseMI->getOpcode()));
+      UseMIs.push_back(UseMI);
+      LastUseMI = UseMI;
+    }
+
+    for (MachineInstr *UseMI : UseMIs) {
+      for (unsigned i = 0, e = UseMI->getNumOperands(); i != e; ++i) {
+        MachineOperand &MO = UseMI->getOperand(i);
+        if (MO.isReg() && MO.getReg()==base_reg)
+          MO.setReg(SPECIAL_REG);
+      }
+    }
+    MachineBasicBlock::iterator Last(LastUseMI);
+    Last++;
+    unsigned Addr = DefMI->getOperand(1).getImm();
+    if ((Addr >= MPU_START && Addr < MPU_END) || Addr == VTOR_ADDR)
+      BuildMI(*LastUseMI->getParent(), Last, LastUseMI->getDebugLoc(), TII->get(ARM::t2MOVi), SPECIAL_REG)
+        .addImm(0).add(predOps(ARMCC::AL)).add(condCodeOp());
+    BuildMI(*LastUseMI->getParent(), Last, LastUseMI->getDebugLoc(), TII->get(TargetOpcode::COPY), SPECIAL_REG)
+      .addReg(tmp_reg);
+    instPostCheck(*LastUseMI->getParent(), Last);
+    BuildMI(*LastUseMI->getParent(), Last, LastUseMI->getDebugLoc(), TII->get(ARM::tCPSI))
+      .addImm(0).addImm(1);
+
+    if (CopyMI) {
+      CopyMI->setDesc(TII->get(ARM::t2MOVi32imm));
+      CopyMI->getOperand(1).ChangeToImmediate(DefMI->getOperand(1).getImm());
+    }
+
+    if (UseMIInOtherBB) {
+      BuildMI(*UseMIInOtherBB->getParent(), UseMIInOtherBB, UseMIInOtherBB->getDebugLoc(),
+              TII->get(ARM::t2MOVi32imm), OrigVReg).addImm(DefMI->getOperand(1).getImm());
+    }
+
+    return false;
+  }
 
   if (EnableXOMSFI)
     return instImmSFI(MI, MFI, base_MO->getReg(), isStore);
@@ -479,8 +656,12 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   int new_inst_imm = 0;
   int offset_imm = 0;
 
-  if (requirePrivilege(base_MO->getReg()))
+  MachineInstr *DefMI;
+  bool IsVariable = false;
+  if (requirePrivilege(base_MO->getReg(), DefMI, IsVariable)) {
+    assert(0);
     return false;
+  }
 
   if (orig_imm < 0) {
     dbgs() << (isStore? "strd" : "ldrd") << " (imm) : imm < 0\n";
@@ -682,6 +863,8 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::tBL: case ARM::tBLXr: case ARM::tBX_RET:
   case ARM::t2B: case ARM::t2Bcc: case ARM::t2BR_JT:
   case ARM::TCRETURNdi: case ARM::TCRETURNri:
+
+  case ARM::tCPSI: // inserted by this pass
     return false;
 
   default: {

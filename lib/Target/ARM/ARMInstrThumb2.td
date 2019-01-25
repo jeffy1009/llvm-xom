@@ -3670,6 +3670,23 @@ def : t2InstAlias<"cps$imod.w $iflags, $mode",
                    (t2CPS3p imod_op:$imod, iflags_op:$iflags, i32imm:$mode), 0>;
 def : t2InstAlias<"cps.w $mode", (t2CPS1p imm0_31:$mode), 0>;
 
+def tCPSI : TI<(outs), (ins imod_op:$imod, iflags_op:$iflags), NoItinerary, "cpsi$imod\t$iflags", []>,
+            T1Encoding<{1,0,1,1,0,1}> {
+  bits<1> imod;
+  bits<1> iflags;
+
+  let Inst{9-5} = 0b10011;
+  let Inst{4} = imod;
+  let Inst{3-2} = 0b00;
+  let Inst{1} = iflags;
+  let Inst{0} = 0b0;
+}
+
+let usesCustomInserter = 1 in {
+ def XOM_CHECK_ADDR_MPU : PseudoInst<(outs), (ins GPR:$Rs, GPR:$Rt), NoItinerary, []>,
+                          Sched<[WriteALU, ReadALU]>;
+}
+
 // A6.3.4 Branches and miscellaneous control
 // Table A6-14 Change Processor State, and hint instructions
 def t2HINT : T2I<(outs), (ins imm0_239:$imm), NoItinerary, "hint", ".w\t$imm",

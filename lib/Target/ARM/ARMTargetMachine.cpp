@@ -488,4 +488,7 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMOptimizeBarriersPass());
 
   addPass(createARMConstantIslandPass());
+
+  if (EnableXOMInst)
+    addPass(createARMXOMPseudoExpandPass());
 }
