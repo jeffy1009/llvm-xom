@@ -60,7 +60,16 @@ namespace {
     MachineRegisterInfo *MRI;
     // MachineFunction *MF;
 
-	int count = 0;
+    int InstRegCount = 0;
+    int InstImmPreIdxCount = 0;
+    int InstImmPostIdxCount = 0;
+    int InstImmNoIdxOffsetCount = 0;
+    int InstImmNoIdxCount = 0;
+    int InstDoubleOffsetCount = 0;
+    int InstDoubleCount = 0;
+    int InstRegPrivCount = 0;
+    int InstImmPrivVarCount = 0;
+    int InstImmPrivCount = 0;
 
     // IsVariable: load/store address is not fixed
     bool requirePrivilege(unsigned Reg, MachineInstr *&DefMI, bool &IsVariable);
@@ -330,6 +339,7 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   bool IsVariable = false;
   if (requirePrivilege(base_MO->getReg(), DefMI, IsVariable)
       || requirePrivilege(offset_MO->getReg(), DefMI, IsVariable)) {
+    ++InstRegPrivCount;
     if (EnableXOMSFI)
       return false;
 
@@ -350,6 +360,7 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     return false;
   }
 
+  ++InstRegCount;
   unsigned value_reg = value_MO->getReg();
   unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
   addOffsetInstReg(MI, MFI, new_inst, tmp_reg, base_MO, offset_MO, shift_imm);
@@ -507,6 +518,8 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       return false;
 
     if (IsVariable) {
+      ++InstImmPrivVarCount;
+
       MachineInstr *Addr = &*MRI->def_instr_begin(base_reg);
       BuildMI(*Addr->getParent(), Addr, Addr->getDebugLoc(), TII->get(ARM::tCPSI))
         .addImm(1).addImm(1);
@@ -603,6 +616,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   new_opcode = getPrivilegedOpcode(new_opcode);
   switch (idx_mode) {
   case PRE_IDX: {
+    ++InstImmPreIdxCount;
     addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
       .addReg(value_reg,
@@ -612,6 +626,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     break;
   }
   case POST_IDX: {
+    ++InstImmPostIdxCount;
     addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
       .addReg(value_reg,
@@ -622,6 +637,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   }
   case NO_IDX: {
     if (new_inst != INST_NONE) {
+      ++InstImmNoIdxOffsetCount;
       unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
       addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
@@ -630,6 +646,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         .addReg(tmp_reg, RegState::Kill).addImm(offset_imm)
         .add(predOps(ARMCC::AL));
     } else {
+      ++InstImmNoIdxCount;
       BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
         .addReg(value_reg,
                 isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
@@ -683,6 +700,7 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
   new_opcode = getPrivilegedOpcode(new_opcode);
   if (new_inst != INST_NONE) {
+    ++InstDoubleOffsetCount;
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     addOffsetInstImm(MI, MFI, new_inst, tmp_reg, base_MO, new_inst_imm);
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
@@ -696,6 +714,7 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       .addReg(tmp_reg, RegState::Kill).addImm(offset_imm+4)
       .add(predOps(ARMCC::AL));
   } else {
+    ++InstDoubleCount;
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
       .addReg(value1_reg,
               isStore? (value1_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
@@ -903,12 +922,22 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
       MachineInstr &MI = *MBBI;
       if (instMemoryOp(MI, MFI)) {
         MI.eraseFromParent();
-        count++;
       }
       MBBI = NMBBI;
-      //        dbgs() << "instrumented !!!!! : " << count  << "\n";
     }
   }
+
+  dbgs() << "Current function name   : " << Fn.getName() << "\n";
+  dbgs() << "InstRegCount            : " << InstRegCount  << "\n";
+  dbgs() << "InstImmPreIdxCount      : " << InstImmPreIdxCount  << "\n";
+  dbgs() << "InstImmPostIdxCount     : " << InstImmPostIdxCount  << "\n";
+  dbgs() << "InstImmNoIdxOffsetCount : " << InstImmNoIdxOffsetCount  << "\n";
+  dbgs() << "InstImmNoIdxCount       : " << InstImmNoIdxCount  << "\n";
+  dbgs() << "InstDoubleOffsetCount   : " << InstDoubleOffsetCount  << "\n";
+  dbgs() << "InstDoubleCount         : " << InstDoubleCount  << "\n";
+  dbgs() << "InstRegPrivCount        : " << InstRegPrivCount  << "\n";
+  dbgs() << "InstImmPrivVarCount     : " << InstImmPrivVarCount  << "\n";
+  dbgs() << "InstImmPrivCount        : " << InstImmPrivCount  << "\n";
 
   return Modified;
 }
