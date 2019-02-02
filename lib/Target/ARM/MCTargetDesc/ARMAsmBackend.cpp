@@ -294,11 +294,16 @@ void ARMAsmBackend::relaxInstruction(const MCInst &Inst,
 bool ARMAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   const uint16_t Thumb1_16bitNopEncoding = 0x46c0; // using MOV r8,r8
   const uint16_t Thumb2_16bitNopEncoding = 0xbf00; // NOP
+  const uint32_t Thumb_32bitNopEncoding = 0x8000f3af;
   const uint32_t ARMv4_NopEncoding = 0xe1a00000;   // using MOV r0,r0
   const uint32_t ARMv6T2_NopEncoding = 0xe320f000; // NOP
   if (isThumb()) {
     const uint16_t nopEncoding =
         hasNOP() ? Thumb2_16bitNopEncoding : Thumb1_16bitNopEncoding;
+    uint64_t Num32bitNops = Count / 4;
+    for (uint64_t i = 0; i != Num32bitNops; ++i)
+      OW->write32(Thumb_32bitNopEncoding);
+    Count -= Num32bitNops * 4;
     uint64_t NumNops = Count / 2;
     for (uint64_t i = 0; i != NumNops; ++i)
       OW->write16(nopEncoding);
