@@ -79,6 +79,11 @@ EnableXOMInst("enable-xom-inst", cl::Hidden, cl::ZeroOrMore,
               cl::desc("Enable XOM instrumentation"),
               cl::init(false));
 
+cl::opt<bool>
+EnableXOMSFI("xom-sfi-mode", cl::Hidden, cl::ZeroOrMore,
+             cl::desc("use SFI for XOM instrumentation"),
+             cl::init(false));
+
 namespace llvm {
   void initializeARMExecutionDepsFixPass(PassRegistry&);
 }
@@ -477,6 +482,10 @@ void ARMPassConfig::addPreSched2() {
 
 void ARMPassConfig::addPreEmitPass() {
   addPass(createThumb2SizeReductionPass());
+
+  // should be here it causes some problem
+  if (EnableXOMSFI)
+    addPass(createARMBranchSFIPass());
 
   // Constant island pass work on unbundled instructions.
   addPass(createUnpackMachineBundles([](const MachineFunction &MF) {

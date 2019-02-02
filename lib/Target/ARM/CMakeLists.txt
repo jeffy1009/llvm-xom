@@ -67,6 +67,7 @@ add_llvm_target(ARMCodeGen
   ARMComputeBlockSize.cpp
   ARMTestPass.cpp
   ARMXOMPseudoExpand.cpp
+  ARMBranchSFI.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
   )
 
