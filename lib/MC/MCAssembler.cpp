@@ -289,7 +289,21 @@ uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
   case MCFragment::FT_Align: {
     const MCAlignFragment &AF = cast<MCAlignFragment>(F);
     unsigned Offset = Layout.getFragmentOffset(&AF);
-    unsigned Size = OffsetToAlignment(Offset, AF.getAlignment());
+    uint64_t Alignment = AF.getAlignment();
+    unsigned Size;
+    if (Alignment == 12) { // ARM::tBL
+      Size = OffsetToAlignment(Offset, 16);
+      if (Size >= 4) Size -= 4;
+      else Size += 12;
+      return Size;
+    } else if (Alignment == 14) { // ARM::tBLXr
+      Size = OffsetToAlignment(Offset, 16);
+      if (Size >= 2) Size -= 2;
+      else Size += 14;
+      return Size;
+    } else {
+      Size = OffsetToAlignment(Offset, Alignment);
+    }
     // If we are padding with nops, force the padding to be larger than the
     // minimum nop size.
     if (Size > 0 && AF.hasEmitNops()) {

@@ -35,10 +35,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "arm-testpass"
 
-static cl::opt<bool>
-EnableXOMSFI("xom-sfi-mode", cl::Hidden, cl::ZeroOrMore,
-             cl::desc("use SFI for XOM instrumentation"),
-             cl::init(false));
+extern cl::opt<bool> EnableXOMSFI;
 
 namespace llvm {
 void initializeARMTestPassPass(PassRegistry &);

@@ -56,6 +56,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
 
+extern cl::opt<bool> EnableXOMSFI;
+
 ARMAsmPrinter::ARMAsmPrinter(TargetMachine &TM,
                              std::unique_ptr<MCStreamer> Streamer)
     : AsmPrinter(TM, std::move(Streamer)), AFI(nullptr), MCP(nullptr),
@@ -1997,6 +1999,31 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   MCInst TmpInst;
   LowerARMMachineInstrToMCInst(MI, TmpInst, *this);
+
+  if (EnableXOMSFI) {
+    switch (MI->getOpcode()) {
+    case ARM::t2CMPri: {
+      int imm = MI->getOperand(1).getImm();
+      if (imm == 0x80000 || imm == 0xe0000000)
+        OutStreamer->EmitCodeAlignment(16);
+      break;
+    }
+    case ARM::t2BICri: { // indirect branch, return
+      int imm = MI->getOperand(2).getImm();
+      if (imm == 0x80000000)
+        OutStreamer->EmitCodeAlignment(16);
+      break;
+    }
+    case ARM::tBL: {
+      OutStreamer->EmitCodeAlignment(12);
+      break;
+    }
+    case ARM::tBLXr: {
+      OutStreamer->EmitCodeAlignment(14);
+      break;
+    }
+    }
+  }
 
   EmitToStreamer(*OutStreamer, TmpInst);
 }
