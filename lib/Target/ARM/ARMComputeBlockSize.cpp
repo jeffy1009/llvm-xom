@@ -53,25 +53,25 @@ void computeBlockSize(MachineFunction *MF, MachineBasicBlock *MBB,
 
   for (MachineInstr &I : *MBB) {
     BBI.Size += TII->getInstSizeInBytes(I);
-    if (EnableXOMSFI) {
-      switch (I.getOpcode()) {
-      case ARM::t2CMPri: { // load/store mask
-        int imm = I.getOperand(1).getImm();
-        if (imm == 0x80000 || imm == 0xe0000000)
-          BBI.Size += 14;
-        break;
-      }
-      case ARM::t2BICri: { // indirect branch, return
-        int imm = I.getOperand(2).getImm();
-        if (imm == 0x80000000)
-          BBI.Size += 14;
-        break;
-      }
-      case ARM::tBL:
-      case ARM::tBLXr: // callsite
-        BBI.Size += 14;
-      }
-    }
+    // if (EnableXOMSFI) {
+    //   switch (I.getOpcode()) {
+    //   case ARM::t2CMPri: { // load/store mask
+    //     int imm = I.getOperand(1).getImm();
+    //     if (imm == 0x80000 || imm == 0xe0000000)
+    //       BBI.Size += 14;
+    //     break;
+    //   }
+    //   case ARM::t2BICri: { // indirect branch, return
+    //     int imm = I.getOperand(2).getImm();
+    //     if (imm == 0x80000000)
+    //       BBI.Size += 14;
+    //     break;
+    //   }
+    //   case ARM::tBL:
+    //   case ARM::tBLXr: // callsite
+    //     BBI.Size += 14;
+    //   }
+    // }
     // For inline asm, getInstSizeInBytes returns a conservative estimate.
     // The actual size may be smaller, but still a multiple of the instr size.
     if (I.isInlineAsm())

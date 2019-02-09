@@ -75,6 +75,8 @@ static cl::opt<bool>
 EnableARM3Addr("enable-arm-3-addr-conv", cl::Hidden,
                cl::desc("Enable ARM 2-addr to 3-addr conv"));
 
+extern cl::opt<bool> EnableXOMSFI;
+
 /// ARM_MLxEntry - Record information about MLA / MLS instructions.
 struct ARM_MLxEntry {
   uint16_t MLxOpc;     // MLA / MLS opcode
@@ -704,6 +706,26 @@ unsigned ARMBaseInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   const MCAsmInfo *MAI = MF->getTarget().getMCAsmInfo();
 
   const MCInstrDesc &MCID = MI.getDesc();
+  if (EnableXOMSFI) {
+    int size = MCID.getSize();
+    switch (MI.getOpcode()) {
+    case ARM::t2CMPri: { // load/store mask
+      int imm = MI.getOperand(1).getImm();
+      if (imm == 0x80000 || imm == 0xe0000000)
+        return size + 8;
+      break;
+    }
+    case ARM::t2BICri: { // indirect branch, return
+      int imm = MI.getOperand(2).getImm();
+      if (imm == 0x80000000)
+        return size + 4;
+      break;
+    }
+    case ARM::tBL:
+    case ARM::tBLXr: // callsite
+      return size += 14;
+    }
+  }
   if (MCID.getSize())
     return MCID.getSize();
 
