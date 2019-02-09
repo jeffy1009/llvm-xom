@@ -316,6 +316,9 @@ void ARMTestPass::instPostCheck(MachineBasicBlock &MFI, MachineBasicBlock::itera
 bool ARMTestPass::
 instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         MachineBasicBlock &MFI, bool isStore) {
+  if (isStore && EnableXOMSFI)
+    return false;
+
   MachineOperand *value_MO = &MI.getOperand(0);
   MachineOperand *base_MO = &MI.getOperand(1);
   MachineOperand *offset_MO = &MI.getOperand(2);
@@ -334,8 +337,9 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   // Both Rn or Rm could be the base
   MachineInstr *DefMI;
   bool IsVariable = false;
-  if (requirePrivilege(base_MO->getReg(), DefMI, IsVariable)
-      || requirePrivilege(offset_MO->getReg(), DefMI, IsVariable)) {
+  if (!EnableXOMSFI &&
+      (requirePrivilege(base_MO->getReg(), DefMI, IsVariable)
+       || requirePrivilege(offset_MO->getReg(), DefMI, IsVariable))) {
     ++InstRegPrivCount;
     if (EnableXOMSFI)
       return false;
@@ -425,6 +429,9 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     return false;
   }
 
+  if (isStore && EnableXOMSFI)
+    return false;
+
   MachineOperand *value_MO;
   unsigned idx_reg = -1; // pre/post index
   MachineOperand *base_MO;
@@ -510,7 +517,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     return false;
 
   bool IsVariable = false;
-  if (requirePrivilege(base_reg, DefMI, IsVariable)) {
+  if (!EnableXOMSFI && requirePrivilege(base_reg, DefMI, IsVariable)) {
     if (EnableXOMSFI)
       return false;
 
@@ -660,6 +667,9 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 bool ARMTestPass::
 instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
                MachineBasicBlock &MFI, bool isStore) {
+  if (isStore && EnableXOMSFI)
+    return false;
+
   MachineOperand *value1_MO = &MI.getOperand(0);
   unsigned value1_reg = value1_MO->getReg();
   MachineOperand *value2_MO = &MI.getOperand(1);
