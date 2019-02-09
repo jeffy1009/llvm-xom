@@ -291,7 +291,15 @@ uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
     unsigned Offset = Layout.getFragmentOffset(&AF);
     uint64_t Alignment = AF.getAlignment();
     unsigned Size;
-    if (Alignment == 12) { // ARM::tBL
+    if (Alignment == 17) { // ARM::t2CMPri
+      Size = OffsetToAlignment(Offset, 16);
+      if (Size < 10) return Size;
+      else return 0;
+    } else if (Alignment == 18) { // ARM::t2BICri
+      Size = OffsetToAlignment(Offset, 16);
+      if (Size < 6) return Size;
+      else return 0;
+    } else if (Alignment == 12) { // ARM::tBL
       Size = OffsetToAlignment(Offset, 16);
       if (Size >= 4) Size -= 4;
       else Size += 12;

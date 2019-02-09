@@ -2005,13 +2005,13 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     case ARM::t2CMPri: {
       int imm = MI->getOperand(1).getImm();
       if (imm == 0x80000 || imm == 0xe0000000)
-        OutStreamer->EmitCodeAlignment(16);
+        OutStreamer->EmitCodeAlignment(17); // just a random value
       break;
     }
     case ARM::t2BICri: { // indirect branch, return
       int imm = MI->getOperand(2).getImm();
       if (imm == 0x80000000)
-        OutStreamer->EmitCodeAlignment(16);
+        OutStreamer->EmitCodeAlignment(18);
       break;
     }
     case ARM::tBL: {
