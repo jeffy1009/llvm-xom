@@ -49,6 +49,7 @@ FunctionPass *createThumb2SizeReductionPass(
 FunctionPass *createARMTestPassPass();
 FunctionPass *createARMXOMPseudoExpandPass();
 FunctionPass *createARMBranchSFIPass();
+FunctionPass *createARMSandboxSPPass();
 InstructionSelector *
 createARMInstructionSelector(const ARMBaseTargetMachine &TM, const ARMSubtarget &STI,
                              const ARMRegisterBankInfo &RBI);
