@@ -41,6 +41,7 @@ OldT2IfCvt("old-thumb2-ifcvt", cl::Hidden,
            cl::init(false));
 
 extern cl::opt<bool> EnableXOMInst;
+extern cl::opt<bool> EnableXOMSFI;
 
 Thumb2InstrInfo::Thumb2InstrInfo(const ARMSubtarget &STI)
     : ARMBaseInstrInfo(STI) {}
@@ -641,7 +642,7 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
 
     MachineFunction &MF = *MI.getParent()->getParent();
     MachineRegisterInfo *MRI = &MF.getRegInfo();
-    if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP) {
+    if (EnableXOMInst && !EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP) {
       dbgs() << "Frame Access using register other than SP. Opcode:" << NewOpc << '\n';
       NumBits = 8;
     }
@@ -656,13 +657,24 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
     if ((unsigned)Offset <= Mask * Scale) {
       // Replace the FrameIndex with fp/sp
       MI.getOperand(FrameRegIdx).ChangeToRegister(FrameReg, false);
+      if (EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP && MI.mayLoad()) {
+        unsigned PredReg;
+        assert(getInstrPredicate(MI, PredReg)==ARMCC::AL);
+#define LD_BOUNDARY 0x80000
+        MachineOperand &AddrMO = MI.getOperand(1);
+        BuildMI(*MI.getParent(), &MI, MI.getDebugLoc(), TII.get(ARM::t2CMPri))
+          .addReg(AddrMO.getReg()).addImm(LD_BOUNDARY).add(predOps(ARMCC::AL));
+        MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::HS);
+        MI.addOperand(MachineOperand::CreateReg(ARM::CPSR, /* isDef= */ false,
+                                                /* isImp= */ true));
+      }
       if (isSub) {
         if (AddrMode == ARMII::AddrMode5) {
           assert(FrameReg == ARM::SP);
           // FIXME: Not consistent.
           ImmedOffset |= 1 << NumBits;
         } else {
-          if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP) {
+          if (EnableXOMInst && !EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP) {
             RegScavenger RS;
             RS.enterBasicBlock(*MI.getParent());
             RS.forward(MI);
@@ -689,7 +701,7 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
           }
         }
       }
-      if (EnableXOMInst && !MRI->isSSA() && FrameReg != ARM::SP && Success) {
+      if (EnableXOMInst && !EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP && Success) {
         MI.setDesc(TII.get(getPrivilegedOpcode(NewOpc)));
       }
       ImmOp.ChangeToImmediate(ImmedOffset);
