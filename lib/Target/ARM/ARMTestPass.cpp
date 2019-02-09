@@ -516,6 +516,11 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   if (!EnableXOMSFI && base_reg==SPECIAL_REG)
     return false;
 
+  // Special case: passing arguments through stack (if # arguments > 4)
+  MachineInstr *TmpMI = &*MRI->def_instr_begin(base_reg);
+  if (TmpMI->getOpcode()==TargetOpcode::COPY && TmpMI->getOperand(1).getReg()==ARM::SP)
+    return false;
+
   bool IsVariable = false;
   if (!EnableXOMSFI && requirePrivilege(base_reg, DefMI, IsVariable)) {
     if (EnableXOMSFI)
@@ -631,12 +636,12 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
   }
   case POST_IDX: {
     ++InstImmPostIdxCount;
-    addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
     BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
       .addReg(value_reg,
               isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
       .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm)
       .add(predOps(ARMCC::AL));
+    addOffsetInstImm(MI, MFI, new_inst, idx_reg, base_MO, new_inst_imm);
     break;
   }
   case NO_IDX: {
@@ -859,7 +864,7 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
   case ARM::t2MOVsrl_flag: case ARM::t2MOVsra_flag:
   case ARM::t2MOVCCi: case ARM::t2MOVCCi16: case ARM::t2MOVCCi32imm: case ARM::t2MOVCCr:
   case ARM::t2MOVCCasr: case ARM::t2MOVCClsl: case ARM::t2MOVCClsr:
-  case ARM::t2MVNi: case ARM::t2MVNr: case ARM::t2MVNCCi:
+  case ARM::t2MVNi: case ARM::t2MVNr: case ARM::t2MVNs: case ARM::t2MVNCCi:
   case ARM::t2LEApcrelJT:
   case ARM::t2SXTH: case ARM::t2SXTB: case ARM::t2UXTH: case ARM::t2UXTB:
   case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDrs: case ARM::t2ADDri12:
