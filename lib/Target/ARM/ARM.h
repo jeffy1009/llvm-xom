@@ -50,6 +50,8 @@ FunctionPass *createARMTestPassPass();
 FunctionPass *createARMXOMPseudoExpandPass();
 FunctionPass *createARMBranchSFIPass();
 FunctionPass *createARMSandboxSPPass();
+FunctionPass *createARMTrampolinePass(); // gykim
+
 InstructionSelector *
 createARMInstructionSelector(const ARMBaseTargetMachine &TM, const ARMSubtarget &STI,
                              const ARMRegisterBankInfo &RBI);

@@ -83,6 +83,11 @@ cl::opt<bool>
 EnableXOMSFI("xom-sfi-mode", cl::Hidden, cl::ZeroOrMore,
              cl::desc("use SFI for XOM instrumentation"),
              cl::init(false));
+// gykim
+cl::opt<bool>
+EnableTrampoline("enable-trampoline", cl::Hidden, cl::ZeroOrMore,
+              cl::desc("Enable trampoline"),
+              cl::init(false));
 
 namespace llvm {
   void initializeARMExecutionDepsFixPass(PassRegistry&);
@@ -502,4 +507,7 @@ void ARMPassConfig::addPreEmitPass() {
     addPass(createARMXOMPseudoExpandPass());
     addPass(createARMSandboxSPPass());
   }
+  // gykim
+  if (EnableTrampoline)
+    addPass(createARMTrampolinePass());
 }

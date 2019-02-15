@@ -158,9 +158,9 @@ public:
 
   void setOperand(unsigned i, Value *Val) {
     assert(i < NumUserOperands && "setOperand() out of range!");
-    assert((!isa<Constant>((const Value*)this) ||
-            isa<GlobalValue>((const Value*)this)) &&
-           "Cannot mutate a constant with setOperand!");
+    // assert((!isa<Constant>((const Value*)this) ||
+    //         isa<GlobalValue>((const Value*)this)) &&
+    //        "Cannot mutate a constant with setOperand!");
     getOperandList()[i] = Val;
   }
 

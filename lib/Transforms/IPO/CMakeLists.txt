@@ -30,6 +30,7 @@ add_llvm_library(LLVMipo
   StripSymbols.cpp
   ThinLTOBitcodeWriter.cpp
   WholeProgramDevirt.cpp
+  IndirectTrampoline.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Transforms

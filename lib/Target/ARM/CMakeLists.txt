@@ -69,6 +69,7 @@ add_llvm_target(ARMCodeGen
   ARMXOMPseudoExpand.cpp
   ARMBranchSFI.cpp
   ARMSandboxSP.cpp
+  ARMTrampoline.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
   )
 
