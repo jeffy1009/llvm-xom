@@ -523,6 +523,10 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
 
   bool IsVariable = false;
   if (!EnableXOMSFI && requirePrivilege(base_reg, DefMI, IsVariable)) {
+    // TODO: handle DWT
+    if ((unsigned)DefMI->getOperand(1).getImm() == 0xe0001004)
+      return false;
+
     if (EnableXOMSFI)
       return false;
 
@@ -929,7 +933,8 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   InstImmPrivCount = 0;
 
   bool Modified = false;
-  if(Fn.getName().compare(StringRef("__sfputc_r")) == 0)
+  if(Fn.getName().compare(StringRef("__sfputc_r")) == 0 ||
+     Fn.getName().compare(StringRef("cortexm_init_dwt")) == 0)
     return Modified;
 
   for (MachineBasicBlock &MFI : Fn) {
