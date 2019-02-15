@@ -546,6 +546,7 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
       return false;
     }
 
+    ++InstImmPrivCount;
     unsigned OrigVReg = DefMI->getOperand(0).getReg();
     unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
     if (DefMI->getParent() != &MFI) {
@@ -915,6 +916,17 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   // TRI = STI->getRegisterInfo();
   MRI = &Fn.getRegInfo();
   // MF  = &Fn;
+
+  InstRegCount = 0;
+  InstImmPreIdxCount = 0;
+  InstImmPostIdxCount = 0;
+  InstImmNoIdxOffsetCount = 0;
+  InstImmNoIdxCount = 0;
+  InstDoubleOffsetCount = 0;
+  InstDoubleCount = 0;
+  InstRegPrivCount = 0;
+  InstImmPrivVarCount = 0;
+  InstImmPrivCount = 0;
 
   bool Modified = false;
   if(Fn.getName().compare(StringRef("__sfputc_r")) == 0)

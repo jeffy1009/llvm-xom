@@ -29,6 +29,10 @@ namespace {
     MachineRegisterInfo *MRI;
     const MachineModuleInfo *MMI;
 
+    int NonConstantCount = 0;
+    int ConstantSuccessCount = 0;
+    int ConstantFailCount = 0;
+
     bool searchForMemAccess(DenseMap<MachineBasicBlock*, bool> &MBBInfo,
                             MachineBasicBlock *MBB,
                             MachineBasicBlock::iterator MBBI, int imm,
@@ -174,6 +178,10 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
   MRI = &Fn.getRegInfo();
   MMI = &getAnalysis<MachineModuleInfo>();
 
+  NonConstantCount = 0;
+  ConstantFailCount = 0;
+  ConstantSuccessCount = 0;
+
   bool Modified = false;
 
   for (MachineBasicBlock &MFI : Fn) {
@@ -213,6 +221,7 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
           continue;
         dbgs() << "Non-constant SP modification: "
                << TII->getName(MI.getOpcode()) << "\n";
+        ++NonConstantCount;
         BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2BICri), ARM::SP)
           .addReg(ARM::SP).addImm(0xd0000000).add(predOps(ARMCC::AL)).add(condCodeOp());
         BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2ORRri), ARM::SP)
@@ -226,16 +235,21 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
         DenseMap<MachineBasicBlock*, bool> MBBInfo;
         if (!searchForMemAccess(MBBInfo, &MFI, TmpMBBI, imm)) {
           dbgs() << "Memory Access Search FAILed\n";
+          ++ConstantFailCount;
           // TODO: do this correctly
           BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2BICri), ARM::SP)
             .addReg(ARM::SP).addImm(0xd0000000).add(predOps(ARMCC::AL)).add(condCodeOp());
         } else {
           dbgs() << "Memory Access Search SUCCESS\n";
+          ++ConstantSuccessCount;
         }
       }
     }
   }
 
+  dbgs() << "NonConstantCount        : " << NonConstantCount  << "\n";
+  dbgs() << "ConstantFailCount       : " << ConstantFailCount  << "\n";
+  dbgs() << "ConstantSuccessCount    : " << ConstantSuccessCount  << "\n";
   return Modified;
 }
 

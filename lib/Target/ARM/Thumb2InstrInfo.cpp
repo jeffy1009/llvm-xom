@@ -500,6 +500,10 @@ static unsigned getPrivilegedOpcode(unsigned Opcode) {
   assert(0);
 }
 
+extern int InstFrameOffsetCount;
+extern int InstFrameCount;
+extern int InstFrameNoRegCount;
+
 bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
                                unsigned FrameReg, int &Offset,
                                const ARMBaseInstrInfo &TII) {
@@ -683,10 +687,12 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
             signed AvailReg = Available.find_first();
             if (AvailReg == -1) {
               // TODO: handle this case
+              ++InstFrameNoRegCount;
               dbgs() << "No available registers\n";
               ImmedOffset = -ImmedOffset;
               Success = false;
             } else {
+              ++InstFrameOffsetCount;
               MachineOperand &AddrMO = MI.getOperand(1);
               BuildMI(*MI.getParent(), &MI, MI.getDebugLoc(), TII.get(ARM::t2SUBri), AvailReg)
                 .addReg(AddrMO.getReg(), AddrMO.isKill() ? RegState::Kill : 0).addImm(ImmedOffset)
@@ -702,6 +708,8 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
         }
       }
       if (EnableXOMInst && !EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP && Success) {
+        if (!isSub)
+          ++InstFrameCount;
         MI.setDesc(TII.get(getPrivilegedOpcode(NewOpc)));
       }
       ImmOp.ChangeToImmediate(ImmedOffset);

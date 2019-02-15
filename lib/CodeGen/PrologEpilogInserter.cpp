@@ -155,10 +155,18 @@ void PEI::getAnalysisUsage(AnalysisUsage &AU) const {
 /// StackObjSet - A set of stack object indexes
 typedef SmallSetVector<int, 8> StackObjSet;
 
+int InstFrameOffsetCount = 0;
+int InstFrameCount = 0;
+int InstFrameNoRegCount = 0;
+
 /// runOnMachineFunction - Insert prolog/epilog code and replace abstract
 /// frame indexes with appropriate references.
 ///
 bool PEI::runOnMachineFunction(MachineFunction &Fn) {
+  InstFrameOffsetCount = 0;
+  InstFrameCount = 0;
+  InstFrameNoRegCount = 0;
+
   if (!SpillCalleeSavedRegisters) {
     const TargetMachine &TM = Fn.getTarget();
     if (!TM.usesPhysRegsForPEI()) {
@@ -238,6 +246,11 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
   RestoreBlocks.clear();
   MFI.setSavePoint(nullptr);
   MFI.setRestorePoint(nullptr);
+  if (!Fn.getRegInfo().isSSA()) {
+    dbgs() << "InstFrameOffsetCount : " << InstFrameOffsetCount << '\n';
+    dbgs() << "InstFrameCount       : " << InstFrameCount << '\n';
+    dbgs() << "InstFrameNoRegCount  : " << InstFrameNoRegCount << '\n';
+  }
   return true;
 }
 
