@@ -1,0 +1,40 @@
+diff --git a/lib/CodeGen/AllocationOrder.cpp b/lib/CodeGen/AllocationOrder.cpp
+index d840a2f..654cdb0 100644
+--- a/lib/CodeGen/AllocationOrder.cpp
++++ b/lib/CodeGen/AllocationOrder.cpp
+@@ -47,8 +47,8 @@ AllocationOrder::AllocationOrder(unsigned VirtReg,
+     }
+   });
+ #ifndef NDEBUG
+-  for (unsigned I = 0, E = Hints.size(); I != E; ++I)
+-    assert(is_contained(Order, Hints[I]) &&
+-           "Target hint is outside allocation order.");
++  // for (unsigned I = 0, E = Hints.size(); I != E; ++I)
++  //   assert(is_contained(Order, Hints[I]) &&
++  //          "Target hint is outside allocation order.");
+ #endif
+ }
+diff --git a/lib/CodeGen/VirtRegMap.cpp b/lib/CodeGen/VirtRegMap.cpp
+index f8aacdb..41f12a9 100644
+--- a/lib/CodeGen/VirtRegMap.cpp
++++ b/lib/CodeGen/VirtRegMap.cpp
+@@ -78,8 +78,8 @@ void VirtRegMap::assignVirt2Phys(unsigned virtReg, MCPhysReg physReg) {
+   assert(Virt2PhysMap[virtReg] == NO_PHYS_REG &&
+          "attempt to assign physical register to already mapped "
+          "virtual register");
+-  assert(!getRegInfo().isReserved(physReg) &&
+-         "Attempt to map virtReg to a reserved physReg");
++  // assert(!getRegInfo().isReserved(physReg) &&
++  //        "Attempt to map virtReg to a reserved physReg");
+   Virt2PhysMap[virtReg] = physReg;
+ }
+ 
+@@ -470,7 +470,7 @@ void VirtRegRewriter::rewrite() {
+         unsigned PhysReg = VRM->getPhys(VirtReg);
+         assert(PhysReg != VirtRegMap::NO_PHYS_REG &&
+                "Instruction uses unmapped VirtReg");
+-        assert(!MRI->isReserved(PhysReg) && "Reserved register assignment");
++        // assert(!MRI->isReserved(PhysReg) && "Reserved register assignment");
+ 
+         // Preserve semantics of sub-register operands.
+         unsigned SubReg = MO.getSubReg();

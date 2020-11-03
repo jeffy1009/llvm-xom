@@ -1,0 +1,346 @@
+diff --git a/include/llvm/CodeGen/TargetPassConfig.h b/include/llvm/CodeGen/TargetPassConfig.h
+index 195ddff..a95f555 100644
+--- a/include/llvm/CodeGen/TargetPassConfig.h
++++ b/include/llvm/CodeGen/TargetPassConfig.h
+@@ -359,6 +359,7 @@ protected:
+   /// immediately before register allocation.
+   virtual void addPreRegAlloc() { }
+ 
++  virtual void addPreRegAllocImmediate() { }
+   /// createTargetRegisterAllocator - Create the register allocator pass for
+   /// this target at the current optimization level.
+   virtual FunctionPass *createTargetRegisterAllocator(bool Optimized);
+diff --git a/lib/CodeGen/TargetPassConfig.cpp b/lib/CodeGen/TargetPassConfig.cpp
+index 624520c..3d7f515 100644
+--- a/lib/CodeGen/TargetPassConfig.cpp
++++ b/lib/CodeGen/TargetPassConfig.cpp
+@@ -961,6 +961,7 @@ void TargetPassConfig::addOptimizedRegAlloc(FunctionPass *RegAllocPass) {
+   addPass(&MachineSchedulerID);
+ 
+   if (RegAllocPass) {
++    addPreRegAllocImmediate();
+     // Add the selected register allocation pass.
+     addPass(RegAllocPass);
+ 
+diff --git a/lib/Target/ARM/ARM.h b/lib/Target/ARM/ARM.h
+index dd845d8..f34a0792 100644
+--- a/lib/Target/ARM/ARM.h
++++ b/lib/Target/ARM/ARM.h
+@@ -47,6 +47,8 @@ FunctionPass *createARMOptimizeBarriersPass();
+ FunctionPass *createThumb2SizeReductionPass(
+     std::function<bool(const Function &)> Ftor = nullptr);
+ FunctionPass *createARMTestPassPass();
++FunctionPass *createARMAdjustBLXLiveRangesPass();
++FunctionPass *createARMRegAllocHintPass();
+ InstructionSelector *
+ createARMInstructionSelector(const ARMBaseTargetMachine &TM, const ARMSubtarget &STI,
+                              const ARMRegisterBankInfo &RBI);
+diff --git a/lib/Target/ARM/ARMAdjustBLXLiveRanges.cpp b/lib/Target/ARM/ARMAdjustBLXLiveRanges.cpp
+new file mode 100644
+index 0000000..9aee5a1
+--- /dev/null
++++ b/lib/Target/ARM/ARMAdjustBLXLiveRanges.cpp
+@@ -0,0 +1,105 @@
++#include "ARM.h"
++// #include "ARMBaseInstrInfo.h"
++// #include "ARMBaseRegisterInfo.h"
++// #include "ARMISelLowering.h"
++// #include "ARMMachineFunctionInfo.h"
++#include "ARMSubtarget.h"
++// #include "MCTargetDesc/ARMAddressingModes.h"
++// #include "ThumbRegisterInfo.h"
++// #include "llvm/ADT/DenseMap.h"
++// #include "llvm/ADT/STLExtras.h"
++// #include "llvm/ADT/SmallPtrSet.h"
++// #include "llvm/ADT/SmallSet.h"
++// #include "llvm/ADT/SmallVector.h"
++// #include "llvm/ADT/Statistic.h"
++#include "llvm/CodeGen/LiveIntervalAnalysis.h"
++#include "llvm/CodeGen/MachineBasicBlock.h"
++#include "llvm/CodeGen/MachineFunction.h"
++#include "llvm/CodeGen/MachineFunctionPass.h"
++// #include "llvm/CodeGen/MachineInstr.h"
++// #include "llvm/CodeGen/MachineInstrBuilder.h"
++#include "llvm/CodeGen/MachineRegisterInfo.h"
++// #include "llvm/CodeGen/RegisterClassInfo.h"
++// #include "llvm/CodeGen/SelectionDAGNodes.h"
++// #include "llvm/CodeGen/LivePhysRegs.h"
++// #include "llvm/IR/DataLayout.h"
++// #include "llvm/IR/DerivedTypes.h"
++// #include "llvm/IR/Function.h"
++// #include "llvm/Support/Allocator.h"
++// #include "llvm/Support/Debug.h"
++// #include "llvm/Support/ErrorHandling.h"
++// #include "llvm/Support/raw_ostream.h"
++// #include "llvm/Target/TargetInstrInfo.h"
++// #include "llvm/Target/TargetMachine.h"
++// #include "llvm/Target/TargetRegisterInfo.h"
++using namespace llvm;
++
++#define DEBUG_TYPE "arm-adjust-blx-liveranges"
++
++namespace llvm {
++void initializeARMAdjustBLXLiveRangesPass(PassRegistry &);
++}
++
++#define ARM_TESTPASS_NAME "ARM adjust blx live ranges pass"
++
++namespace {
++  struct ARMAdjustBLXLiveRanges : public MachineFunctionPass{
++    static char ID;
++    ARMAdjustBLXLiveRanges() : MachineFunctionPass(ID) {
++      initializeARMAdjustBLXLiveRangesPass(*PassRegistry::getPassRegistry());
++    }
++
++    // const DataLayout *TD;
++    const TargetInstrInfo *TII;
++    // const TargetRegisterInfo *TRI;
++    const ARMSubtarget *STI;
++    MachineRegisterInfo *MRI;
++    // MachineFunction *MF;
++
++	int count = 0;
++
++    bool runOnMachineFunction(MachineFunction &Fn) override;
++
++    StringRef getPassName() const override {
++      return ARM_TESTPASS_NAME;
++    }
++
++  };
++  char ARMAdjustBLXLiveRanges::ID = 0;
++}
++
++INITIALIZE_PASS(ARMAdjustBLXLiveRanges, "arm adjust blx live ranges pass",
++                ARM_TESTPASS_NAME, false, false)
++
++bool ARMAdjustBLXLiveRanges::runOnMachineFunction(MachineFunction &Fn) {
++  // TD = &Fn.getDataLayout();
++  STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
++  TII = STI->getInstrInfo();
++  // TRI = STI->getRegisterInfo();
++  MRI = &Fn.getRegInfo();
++  // MF  = &Fn;
++
++  bool Modified = false;
++  for (MachineBasicBlock &MFI : Fn) {
++    MachineBasicBlock::iterator MBBI = MFI.begin(), MBBIE = MFI.end();
++    while (MBBI != MBBIE) {
++      MachineBasicBlock::iterator NMBBI = std::next(MBBI);
++      MachineInstr &MI = *MBBI;
++      if (MI.getOpcode()==ARM::tBLXr) {
++        MachineOperand *MO = &MI.getOperand(2);
++        unsigned tmp_reg = MRI->createVirtualRegister(&ARM::rGPRRegClass);
++        BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY), tmp_reg)
++          .addReg(MO->getReg(), MO->isKill() ? RegState::Kill : 0);
++        MO->setReg(tmp_reg);
++        Modified = true;
++      }
++      MBBI = NMBBI;
++    }
++  }
++
++  return Modified;
++}
++
++FunctionPass *llvm::createARMAdjustBLXLiveRangesPass() {
++  return new ARMAdjustBLXLiveRanges();
++}
+diff --git a/lib/Target/ARM/ARMBaseRegisterInfo.cpp b/lib/Target/ARM/ARMBaseRegisterInfo.cpp
+index 370c0a7..dfb3dea 100644
+--- a/lib/Target/ARM/ARMBaseRegisterInfo.cpp
++++ b/lib/Target/ARM/ARMBaseRegisterInfo.cpp
+@@ -292,6 +292,9 @@ ARMBaseRegisterInfo::getRegAllocationHints(unsigned VirtReg,
+   case ARMRI::RegPairOdd:
+     Odd = 1;
+     break;
++  case ARMRI::RegHintLR:
++    Hints.push_back(Hint.second);
++    return;
+   default:
+     TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints, MF, VRM);
+     return;
+diff --git a/lib/Target/ARM/ARMBaseRegisterInfo.h b/lib/Target/ARM/ARMBaseRegisterInfo.h
+index 2e91d9d..30d5ad8 100644
+--- a/lib/Target/ARM/ARMBaseRegisterInfo.h
++++ b/lib/Target/ARM/ARMBaseRegisterInfo.h
+@@ -32,7 +32,8 @@ namespace ARMRI {
+ 
+   enum {
+     RegPairOdd  = 1,
+-    RegPairEven = 2
++    RegPairEven = 2,
++    RegHintLR = 3
+   };
+ 
+ } // end namespace ARMRI
+diff --git a/lib/Target/ARM/ARMRegAllocHint.cpp b/lib/Target/ARM/ARMRegAllocHint.cpp
+new file mode 100644
+index 0000000..757157e
+--- /dev/null
++++ b/lib/Target/ARM/ARMRegAllocHint.cpp
+@@ -0,0 +1,125 @@
++#include "ARM.h"
++// #include "ARMBaseInstrInfo.h"
++// #include "ARMBaseRegisterInfo.h"
++// #include "ARMISelLowering.h"
++// #include "ARMMachineFunctionInfo.h"
++#include "ARMSubtarget.h"
++// #include "MCTargetDesc/ARMAddressingModes.h"
++// #include "ThumbRegisterInfo.h"
++// #include "llvm/ADT/DenseMap.h"
++// #include "llvm/ADT/STLExtras.h"
++// #include "llvm/ADT/SmallPtrSet.h"
++// #include "llvm/ADT/SmallSet.h"
++// #include "llvm/ADT/SmallVector.h"
++// #include "llvm/ADT/Statistic.h"
++#include "llvm/CodeGen/LiveIntervalAnalysis.h"
++#include "llvm/CodeGen/MachineBasicBlock.h"
++#include "llvm/CodeGen/MachineFunction.h"
++#include "llvm/CodeGen/MachineFunctionPass.h"
++// #include "llvm/CodeGen/MachineInstr.h"
++// #include "llvm/CodeGen/MachineInstrBuilder.h"
++#include "llvm/CodeGen/MachineRegisterInfo.h"
++// #include "llvm/CodeGen/RegisterClassInfo.h"
++// #include "llvm/CodeGen/SelectionDAGNodes.h"
++// #include "llvm/CodeGen/LivePhysRegs.h"
++// #include "llvm/IR/DataLayout.h"
++// #include "llvm/IR/DerivedTypes.h"
++// #include "llvm/IR/Function.h"
++// #include "llvm/Support/Allocator.h"
++// #include "llvm/Support/Debug.h"
++// #include "llvm/Support/ErrorHandling.h"
++// #include "llvm/Support/raw_ostream.h"
++// #include "llvm/Target/TargetInstrInfo.h"
++// #include "llvm/Target/TargetMachine.h"
++// #include "llvm/Target/TargetRegisterInfo.h"
++using namespace llvm;
++
++#define DEBUG_TYPE "arm-regalloc-hint"
++
++namespace llvm {
++void initializeARMRegAllocHintPass(PassRegistry &);
++}
++
++#define ARM_TESTPASS_NAME "ARM regalloc hint pass"
++
++namespace {
++  struct ARMRegAllocHint : public MachineFunctionPass{
++    static char ID;
++    ARMRegAllocHint() : MachineFunctionPass(ID) {
++      initializeARMRegAllocHintPass(*PassRegistry::getPassRegistry());
++    }
++
++    // const DataLayout *TD;
++    const TargetInstrInfo *TII;
++    // const TargetRegisterInfo *TRI;
++    const ARMSubtarget *STI;
++    MachineRegisterInfo *MRI;
++    // MachineFunction *MF;
++    LiveIntervals *LIS;
++
++	int count = 0;
++
++    void setRegAllocHints(LiveInterval &li);
++    bool runOnMachineFunction(MachineFunction &Fn) override;
++    void getAnalysisUsage(AnalysisUsage &AU) const override {
++      AU.addRequired<LiveIntervals>();
++      AU.setPreservesAll();
++      MachineFunctionPass::getAnalysisUsage(AU);
++    }
++
++    StringRef getPassName() const override {
++      return ARM_TESTPASS_NAME;
++    }
++
++  };
++  char ARMRegAllocHint::ID = 0;
++}
++
++INITIALIZE_PASS_BEGIN(ARMRegAllocHint, "arm-regalloc-hint pass",
++                      ARM_TESTPASS_NAME, false, false)
++INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
++INITIALIZE_PASS_END(ARMRegAllocHint, "arm-regalloc-hint pass",
++                    ARM_TESTPASS_NAME, false, false)
++
++void ARMRegAllocHint::setRegAllocHints(LiveInterval &li) {
++  SmallPtrSet<MachineInstr*, 8> visited;
++
++  for (MachineRegisterInfo::reg_instr_iterator
++       I = MRI->reg_instr_begin(li.reg), E = MRI->reg_instr_end();
++       I != E; ) {
++    MachineInstr *mi = &*(I++);
++    if (mi->isIdentityCopy() || mi->isImplicitDef() || mi->isDebugValue())
++      continue;
++    if (!visited.insert(mi).second)
++      continue;
++
++    if (mi->getOpcode()==ARM::tBLXr) {
++      dbgs() << "tBLXr\n";
++      MRI->setRegAllocationHint(li.reg, ARMRI::RegHintLR, ARM::LR);
++      li.markNotSpillable();
++    }
++  }
++}
++
++bool ARMRegAllocHint::runOnMachineFunction(MachineFunction &Fn) {
++  // TD = &Fn.getDataLayout();
++  STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
++  TII = STI->getInstrInfo();
++  // TRI = STI->getRegisterInfo();
++  MRI = &Fn.getRegInfo();
++  // MF  = &Fn;
++  LIS = &getAnalysis<LiveIntervals>();
++
++  for (unsigned i = 0, e = MRI->getNumVirtRegs(); i != e; ++i) {
++    unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
++    if (MRI->reg_nodbg_empty(Reg))
++      continue;
++    setRegAllocHints(LIS->getInterval(Reg));
++  }
++
++  return false;
++}
++
++FunctionPass *llvm::createARMRegAllocHintPass() {
++  return new ARMRegAllocHint();
++}
+diff --git a/lib/Target/ARM/ARMTargetMachine.cpp b/lib/Target/ARM/ARMTargetMachine.cpp
+index e084e72..6bc74af 100644
+--- a/lib/Target/ARM/ARMTargetMachine.cpp
++++ b/lib/Target/ARM/ARMTargetMachine.cpp
+@@ -337,6 +337,7 @@ public:
+   bool addGlobalInstructionSelect() override;
+ #endif
+   void addPreRegAlloc() override;
++  void addPreRegAllocImmediate() override;
+   void addPreSched2() override;
+   void addPreEmitPass() override;
+ };
+@@ -447,6 +448,13 @@ void ARMPassConfig::addPreRegAlloc() {
+     addPass(createARMTestPassPass());
+ }
+ 
++void ARMPassConfig::addPreRegAllocImmediate() {
++  if (EnableXOMInst) {
++    addPass(createARMAdjustBLXLiveRangesPass());
++    addPass(createARMRegAllocHintPass());
++  }
++}
++
+ void ARMPassConfig::addPreSched2() {
+   if (getOptLevel() != CodeGenOpt::None) {
+     if (EnableARMLoadStoreOpt)
+diff --git a/lib/Target/ARM/CMakeLists.txt b/lib/Target/ARM/CMakeLists.txt
+index c1af2ce..698ebe2 100644
+--- a/lib/Target/ARM/CMakeLists.txt
++++ b/lib/Target/ARM/CMakeLists.txt
+@@ -66,6 +66,8 @@ add_llvm_target(ARMCodeGen
+   Thumb2SizeReduction.cpp
+   ARMComputeBlockSize.cpp
+   ARMTestPass.cpp
++  ARMRegAllocHint.cpp
++  ARMAdjustBLXLiveRanges.cpp
+   ${GLOBAL_ISEL_BUILD_FILES}
+   )
+ 

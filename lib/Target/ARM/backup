@@ -1,0 +1,388 @@
+#include <fstream>
+#include "ARM.h"
+#include "ARMSubtarget.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/Support/MathExtras.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "arm-testpass"
+
+namespace llvm {
+void initializeARMRemoveUnintendedPass(PassRegistry &);
+}
+
+#define ARM_TESTPASS_NAME "ARM remove unintended"
+
+cl::opt<std::string>
+UnintendedFilePath("unintended-file-path", cl::ValueOptional, cl::ZeroOrMore,
+                   cl::desc("filepath of unintended.txt"), cl::init("."));
+
+namespace {
+  struct ARMRemoveUnintended : public MachineFunctionPass{
+    static char ID;
+    const ARMSubtarget *STI;
+    const TargetInstrInfo *TII;
+    const MachineRegisterInfo *MRI;
+
+    ARMRemoveUnintended() : MachineFunctionPass(ID) {
+      initializeARMRemoveUnintendedPass(*PassRegistry::getPassRegistry());
+    }
+
+    bool runOnMachineFunction(MachineFunction &Fn) override;
+
+    StringRef getPassName() const override {
+      return ARM_TESTPASS_NAME;
+    }
+
+  };
+  char ARMRemoveUnintended::ID = 0;
+}
+
+INITIALIZE_PASS(ARMRemoveUnintended, "arm-remove-unintended", ARM_TESTPASS_NAME, false, false)
+
+bool ARMRemoveUnintended::runOnMachineFunction(MachineFunction &Fn) {
+  STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
+  TII = STI->getInstrInfo();
+  MRI = &Fn.getRegInfo();
+  const TargetRegisterInfo *TRI = MRI->getTargetRegisterInfo();
+
+  bool Modified = false;
+
+  std::string Filepath;
+  Filepath.append(UnintendedFilePath).append("/unintended.txt");
+  std::ifstream In(Filepath);
+  if (!In.good()) {
+    llvm::errs() << "WARNING: couldn't load file '" << Filepath <<"'\n";
+    return false;
+  }
+
+  DenseMap<int, int> Indices;
+  std::string Line;
+  int CaseNum;
+  int CaseArr[3] = {0};
+  while (In) {
+    std::getline(In, Line);
+    StringRef LineRef(Line);
+    if (!LineRef.startswith("case"))
+      continue;
+
+    int col1_pos = LineRef.find(':');
+    int col2_pos = LineRef.find(':', col1_pos+1);
+    if (!Fn.getName().equals(LineRef.slice(col1_pos+3, col2_pos-1)))
+      continue;
+
+    bool Failed = LineRef.substr(std::strlen("case"), 1).getAsInteger(10, CaseNum);
+    assert(!Failed);
+
+    int index;
+    Failed = LineRef.drop_front(col2_pos+2).getAsInteger(10, index);
+    assert(!Failed);
+    Indices[index] = CaseNum;
+    CaseArr[CaseNum-1]++;
+  }
+
+  if (Indices.empty())
+    return false;
+
+  dbgs() << "Found unintended insts in function:" << Fn.getName() << '\n';
+  dbgs() << "Case1: " << CaseArr[0] << " Case2: " << CaseArr[1] << " Case3: " << CaseArr[2] << '\n';
+
+  DenseMap<MachineInstr*, MachineInstr*> MovPairs;
+
+  int CurIndex = 0;
+  for (MachineBasicBlock &MFI : Fn) {
+    MachineBasicBlock::iterator MBBI = MFI.begin(), MBBIE = MFI.end();
+    while (MBBI != MBBIE) {
+      MachineBasicBlock::iterator NMBBI = std::next(MBBI);
+      MachineInstr &MI = *MBBI;
+      MBBI = NMBBI;
+
+      switch (MI.getOpcode()) {
+      case TargetOpcode::CFI_INSTRUCTION:
+      case TargetOpcode::LOCAL_ESCAPE:
+      case TargetOpcode::EH_LABEL:
+      case TargetOpcode::GC_LABEL:
+      case TargetOpcode::INLINEASM:
+      case TargetOpcode::DBG_VALUE:
+      case TargetOpcode::IMPLICIT_DEF:
+      case TargetOpcode::KILL:
+        continue;
+      default: break;
+      }
+
+      if (Indices.count(CurIndex)) {
+        int CaseNum = Indices[CurIndex];
+        Modified = true;
+        if (CaseNum == 1 || CaseNum == 2) {
+          Modified = true;
+        }
+        switch (MI.getOpcode()) {
+        case ARM::t2ANDrs:
+        case ARM::t2ORRrs:
+        case ARM::t2RSBrs:
+        case ARM::t2ADDrs:
+        case ARM::t2SUBrs:
+          // case ARM::t2CMPrs:
+          {
+          int Rd = MI.getOperand(0).getReg();
+          int Rn = MI.getOperand(1).getReg();
+          int Rm = MI.getOperand(2).getReg();
+          int imm = MI.getOperand(3).getImm();
+          ARM_AM::ShiftOpc shiftmode = ARM_AM::getSORegShOp(imm);
+          int shiftamt = ARM_AM::getSORegOffset(imm);
+          int shiftamt1 = shiftamt;
+          int shiftamt2 = 0;
+          unsigned PredReg;
+          ARMCC::CondCodes PredCC = getInstrPredicate(MI, PredReg);
+          std::array<MachineOperand, 2> Pred = predOps(PredCC, PredReg);
+          bool HasCC = (MI.getOperand(MI.getDesc().getNumOperands()-1).getReg() == ARM::CPSR);
+          assert(!HasCC); // TODO: handle this case
+
+          if (shiftamt > 16) {
+            shiftamt1 = shiftamt - 16;
+            shiftamt2 = shiftamt - shiftamt1;
+          }// else break; //TEST
+
+          MachineInstr* IT = nullptr;
+          bool InsideIT = false;
+          unsigned ITDist = 0;
+          if (MI.readsRegister(ARM::ITSTATE)) {
+            InsideIT = true;
+            // check # of dependent insts
+            auto TmpMII = std::prev(MI.getIterator());
+            int Count = 0;
+            while (true) {
+              if (TmpMII->getOpcode() == ARM::t2IT) break;
+              ++Count; --TmpMII; ++ITDist;
+              assert(Count<3);
+            }
+            IT = &*TmpMII;
+            TmpMII = MI.getIterator();
+            while (true) {
+              if (TmpMII->findRegisterUseOperand(ARM::ITSTATE)->isKill()) break;
+              ++Count; ++TmpMII;
+              assert(Count<3);
+            }
+            assert(ITDist==1);
+          }
+          //          if (InsideIT) break; // TEST
+
+          // check if CPSR is live
+          bool CPSRLive = false;
+          if (!InsideIT) {
+            auto TmpMII = MI.getIterator();
+            while (true) {
+              if (TmpMII == MFI.begin()) {
+                if (MFI.isLiveIn(ARM::CPSR))
+                  CPSRLive = true;
+                break;
+              }
+              --TmpMII;
+              if (TmpMII->killsRegister(ARM::CPSR) || TmpMII->registerDefIsDead(ARM::CPSR))
+                break;
+              if (TmpMII->definesRegister(ARM::CPSR)) {
+                CPSRLive = true;
+                break;
+              }
+            }
+          }
+          //          if (CPSRLive) break; // TEST
+
+          unsigned NewRd = 0;
+          if (Rd == Rn) { // We need a new register
+            // Don't know if this is safe, but we need this to use LivePhysRegs
+            Fn.getProperties().set(MachineFunctionProperties::Property::TracksLiveness);
+            LivePhysRegs LiveRegs;
+            LiveRegs.init(*TRI);
+            LiveRegs.addLiveOuts(MFI);
+            for (MachineInstr &TmpMI : make_range(MFI.rbegin(), MachineBasicBlock::reverse_iterator(MI)))
+              LiveRegs.stepBackward(TmpMI);
+            for (unsigned ScratchReg : ARM::rGPRRegClass) {
+              if (!LiveRegs.available(*MRI, ScratchReg)) continue;
+              NewRd = ScratchReg;
+              break;
+            }
+            assert(NewRd);
+          } else {
+            NewRd = Rd;
+          }
+
+          MachineInstrBuilder MIB;
+          if (NewRd < ARM::R8 && Rm < ARM::R8 && !CPSRLive) {
+            int shiftopc;
+            switch (shiftmode) {
+            case ARM_AM::asr: shiftopc = ARM::tASRri; break;
+            case ARM_AM::lsl: shiftopc = ARM::tLSLri; break;
+            case ARM_AM::lsr: shiftopc = ARM::tLSRri; break;
+            default: assert(0);
+            }
+
+            MIB = BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(shiftopc), NewRd);
+
+            if (InsideIT)
+              MIB.add(condCodeOp());
+            else
+              MIB.addReg(ARM::CPSR, RegState::Define); // TODO Add Dead flag
+
+            MIB.addReg(Rm).addImm(shiftamt1).add(Pred);
+          } else {//break;// TEST
+            int shiftopc;
+            switch (shiftmode) {
+            case ARM_AM::asr: shiftopc = ARM::t2ASRri; break;
+            case ARM_AM::lsl: shiftopc = ARM::t2LSLri; break;
+            case ARM_AM::lsr: shiftopc = ARM::t2LSRri; break;
+            default: assert(0);
+            }
+
+            MIB = BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(shiftopc), NewRd)
+              .addReg(Rm).addImm(shiftamt1).add(Pred).add(condCodeOp());
+          }
+
+          if (InsideIT)
+            MIB.addReg(ARM::ITSTATE, RegState::Implicit);
+
+          if (shiftamt <= 16 && !CPSRLive && (Rd < ARM::R8 && NewRd < ARM::R8 && Rn < ARM::R8)) {
+            int new_opc;
+            switch (MI.getOpcode()) {
+            case ARM::t2ANDrs: new_opc = ARM::tAND; break;
+            case ARM::t2ORRrs: new_opc = ARM::tORR; break;
+            case ARM::t2RSBrs: new_opc = ARM::tRSB; break;
+            case ARM::t2ADDrs: new_opc = ARM::tADDrr; break;
+            case ARM::t2SUBrs: new_opc = ARM::tSUBrr; break;
+            default: assert(0);
+            }
+
+            MIB = BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(new_opc), Rd);
+            if (InsideIT)
+              MIB.add(condCodeOp());
+            else
+              MIB.addReg(ARM::CPSR, RegState::Define); // TODO Add Dead flag
+
+            MIB.addReg(NewRd).addReg(Rn).add(Pred);
+
+            // switch (MI.getOpcode()) {
+            // case ARM::t2ANDrs: new_opc = ARM::t2ANDrr; break;
+            // case ARM::t2ORRrs: new_opc = ARM::t2ORRrr; break;
+            // default: assert(0);
+            // }
+            // MIB = BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(new_opc), Rd)
+            //   .addReg(Rn).addReg(NewRd).add(Pred).add(condCodeOp());
+          } else {
+            MIB = BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(MI.getOpcode()), Rd)
+              .addReg(Rn).addReg(NewRd)
+              .addImm(ARM_AM::getSORegOpc(shiftmode, shiftamt2))
+              .add(Pred).add(condCodeOp());
+          }
+
+          if (InsideIT)
+            MIB.addReg(ARM::ITSTATE,
+                       RegState::Implicit | (MI.killsRegister(ARM::ITSTATE)?RegState::Kill:0));
+
+          // Adjust IT Mask (since we are going to add one inst)
+          if (IT) {
+            unsigned MIBitPos = 3 - ITDist;
+            unsigned Mask = IT->getOperand(1).getImm();
+            unsigned MaskLower = Mask & ((1 << (MIBitPos+1))-1);
+            unsigned NewMask = (Mask & (-1U << MIBitPos)) // clear lower bits
+              | (MaskLower>>1);
+            IT->getOperand(1).setImm(NewMask);
+          }
+
+          MI.eraseFromParent();
+          break;
+        }
+
+        case ARM::t2MOVi16: {
+          //          break; //TODO
+          if (MI.getOperand(1).isGlobal())
+            break;
+          assert(MI.getOperand(1).getImm() & 0x0400);
+          MachineBasicBlock::iterator TmpMII = std::next(MI.getIterator());
+          while (true) {
+            if (TmpMII->getOpcode()==ARM::t2MOVTi16
+                && TmpMII->getOperand(0).getReg()==MI.getOperand(0).getReg()) {
+              MovPairs[&MI] = &*TmpMII;
+              break;
+            }
+            if (TmpMII->readsRegister(MI.getOperand(0).getReg())) {
+              // No corresponding MOVT
+              break; // TODO
+              // BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::tORR), Rd)
+              //   .addReg(ARM::CPSR, RegState::Define)
+              //   .addReg(Rd).addReg(Rn).add(predOps(ARMCC::AL));
+
+              assert(0); // TODO
+            }
+            ++TmpMII;
+            assert(TmpMII != MFI.end());
+          }
+          break;
+        }
+
+        case ARM::t2MOVTi16: {
+          break; //TODO
+          assert(MI.getOperand(2).getImm() & 0x0400);
+          MachineBasicBlock::iterator TmpMII = std::prev(MI.getIterator());
+          while (true) {
+            if ((TmpMII->getOpcode()==ARM::t2MOVi16
+                 || TmpMII->getOpcode()==ARM::tMOVi8)
+                && TmpMII->getOperand(0).getReg()==MI.getOperand(0).getReg()) {
+              if (MovPairs.count(&*TmpMII))
+                break;
+              MovPairs[&*TmpMII] = &MI;
+              break;
+            }
+            assert(!TmpMII->definesRegister(MI.getOperand(0).getReg()));
+            assert(TmpMII != MFI.begin());
+            --TmpMII;
+          }
+          break;
+        }
+        }
+      }
+      ++CurIndex;
+    }
+  }
+
+  for (auto MI : MovPairs) {
+    MachineInstr *MOVW = MI.first;
+    MachineInstr *MOVT = MI.second;
+    bool IsMOVi8 = MOVW->getOpcode()==ARM::tMOVi8;
+    unsigned MOVWImm = IsMOVi8 ? MOVW->getOperand(2).getImm() : MOVW->getOperand(1).getImm();
+    unsigned MOVTImm = MOVT->getOperand(2).getImm();
+    assert((MOVWImm | MOVTImm) != 0xffffffff);
+    unsigned pos = countLeadingOnes((MOVWImm | MOVTImm)<<16);
+    unsigned RotAmtPre = (pos + 5) % 32;
+    unsigned RotAmtPost = (32 - (pos + 5)) % 32;
+    unsigned Imm = MOVWImm | (MOVTImm << 16);
+    unsigned ImmRot = (Imm >> RotAmtPre) | (Imm << (32-RotAmtPre));
+    int Rd = MOVT->getOperand(0).getReg();
+    if (IsMOVi8) {
+      if (ImmRot & 0xff00) {
+        // Change to MOVW
+        BuildMI(*MOVW->getParent(), MOVW->getIterator(), MOVW->getDebugLoc(), TII->get(ARM::t2MOVi16), Rd)
+          .addImm(ImmRot & 0xffff).add(predOps(ARMCC::AL));
+        MOVW->eraseFromParent();
+      } else {
+        MOVW->getOperand(2).setImm(ImmRot & 0xffff);
+      }
+    } else {
+      MOVW->getOperand(1).setImm(ImmRot & 0xffff);
+    }
+    MOVT->getOperand(2).setImm((ImmRot & 0xffff0000) >> 16);
+    BuildMI(*MOVT->getParent(), std::next(MOVT->getIterator()), MOVT->getDebugLoc(), TII->get(ARM::t2RORri), Rd)
+      .addReg(Rd).addImm(RotAmtPost).add(predOps(ARMCC::AL)).add(condCodeOp());
+  }
+
+  return Modified;
+}
+
+FunctionPass *llvm::createARMRemoveUnintendedPass() {
+  return new ARMRemoveUnintended();
+}

@@ -1,0 +1,60 @@
+diff --git a/lib/Target/ARM/ARMSandboxSP.cpp b/lib/Target/ARM/ARMSandboxSP.cpp
+index f66aa5c..ed537ad 100644
+--- a/lib/Target/ARM/ARMSandboxSP.cpp
++++ b/lib/Target/ARM/ARMSandboxSP.cpp
+@@ -189,6 +189,55 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
+     while (MBBI != MBBIE) {
+       MachineBasicBlock::iterator NMBBI = std::next(MBBI);
+       MachineInstr &MI = *MBBI;
++      if (MI.mayLoadOrStore()) {
++        switch (MI.getOpcode()) {
++        case TargetOpcode::INLINEASM:
++          break;
++        case ARM::t2LDRi12: case ARM::t2LDRHi12: case ARM::t2LDRBi12:
++        case ARM::t2LDRSHi12: case ARM::t2LDRSBi12:
++        case ARM::t2STRi12: case ARM::t2STRHi12: case ARM::t2STRBi12:
++        case ARM::t2LDRi8: case ARM::t2LDRHi8: case ARM::t2LDRBi8:
++        case ARM::t2LDRSHi8: case ARM::t2LDRSBi8:
++        case ARM::t2STRi8: case ARM::t2STRHi8: case ARM::t2STRBi8:
++        case ARM::tLDRspi: case ARM::tSTRspi:
++        case ARM::tLDRi: case ARM::tSTRi: {
++          if (MI.getOperand(1).getReg() != ARM::SP) {
++            dbgs() << "JSSHIN";MI.dump();
++            assert(Fn.getName().equals("cortexm_init_dwt"));
++          }
++          break;
++        }
++        case ARM::t2LDR_PRE: case ARM::t2LDR_POST:
++        case ARM::t2LDRH_PRE: case ARM::t2LDRH_POST:
++        case ARM::t2LDRB_PRE: case ARM::t2LDRB_POST:
++        case ARM::t2LDRSH_PRE: case ARM::t2LDRSH_POST:
++        case ARM::t2LDRSB_PRE: case ARM::t2LDRSB_POST:
++        case ARM::t2STR_PRE: case ARM::t2STR_POST:
++        case ARM::t2STRH_PRE: case ARM::t2STRH_POST:
++        case ARM::t2STRB_PRE: case ARM::t2STRB_POST:
++        case ARM::t2LDRDi8: case ARM::t2STRDi8: {
++          if (MI.getOperand(2).getReg() != ARM::SP) {
++            dbgs() << "JSSHIN";MI.dump();
++             assert(0);
++          }
++          break;
++        }
++
++        case ARM::t2STMDB_UPD:
++        case ARM::t2LDMIA_UPD:
++        case ARM::t2LDMIA: case ARM::t2STMIA: case ARM::t2STMIA_UPD:
++        case ARM::tLDMIA: case ARM::tLDMIA_UPD: case ARM::tSTMIA_UPD: {
++          MI.dump();
++          if (MI.getOperand(0).getReg() != ARM::SP) {
++            dbgs() << "JSSHIN";MI.dump();
++             assert(0);
++          }
++          break;
++        }
++        case ARM::tPUSH: case ARM::tPOP: case ARM::tPOP_RET:
++        default:;
++        }
++      }
+       MBBI = NMBBI;
+       if (MI.isPseudo())
+         continue;

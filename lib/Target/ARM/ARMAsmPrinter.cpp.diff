@@ -1,0 +1,61 @@
+diff --git a/lib/Target/ARM/ARMAsmPrinter.cpp b/lib/Target/ARM/ARMAsmPrinter.cpp
+index 53ec12c..c6b8891 100644
+--- a/lib/Target/ARM/ARMAsmPrinter.cpp
++++ b/lib/Target/ARM/ARMAsmPrinter.cpp
+@@ -1206,6 +1206,8 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
+ // instructions) auto-generated.
+ #include "ARMGenMCPseudoLowering.inc"
+ 
++extern MCInst TmpInst2;
++
+ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+   const DataLayout &DL = getDataLayout();
+   MCTargetStreamer &TS = *OutStreamer->getTargetStreamer();
+@@ -1997,8 +1999,47 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+     return;
+   }
+ 
++  const MachineBasicBlock *MBB = MI->getParent();
++  const MachineFunction *MF = MBB->getParent();
++  MachineBasicBlock::const_iterator MII = MI->getIterator();
++  bool InNextBB = false;
++  bool NoNextMI = false;
++  // while (true) {
++  while (false) {
++    ++MII;
++    if (MII == MBB->end()) {
++      assert(!InNextBB && "MBB with no real instr?");
++      auto MBBI = MBB->getIterator();
++      ++MBBI;
++      if (MBBI == MF->end()) {
++        NoNextMI = true;
++        break;
++      }
++      MBB = &*MBBI;
++      MII = MBB->begin();
++      InNextBB = true;
++    }
++    switch (MII->getOpcode()) {
++    case TargetOpcode::CFI_INSTRUCTION:
++    case TargetOpcode::LOCAL_ESCAPE:
++    case TargetOpcode::EH_LABEL:
++    case TargetOpcode::GC_LABEL:
++    case TargetOpcode::INLINEASM:
++    case TargetOpcode::DBG_VALUE:
++    case TargetOpcode::IMPLICIT_DEF:
++    case TargetOpcode::KILL:
++      continue;
++    default: break;
++    }
++    break;
++  }
++
+   MCInst TmpInst;
+   LowerARMMachineInstrToMCInst(MI, TmpInst, *this);
++  // if (NoNextMI)
++  //   TmpInst2.clear();
++  // else
++  //   LowerARMMachineInstrToMCInst(&*MII, TmpInst2, *this);
+ 
+   if (EnableXOMSFI) {
+     switch (MI->getOpcode()) {

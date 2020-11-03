@@ -1,0 +1,25 @@
+diff --git a/lib/Target/ARM/ARMBaseRegisterInfo.cpp b/lib/Target/ARM/ARMBaseRegisterInfo.cpp
+index 370c0a7..cd0126a 100644
+--- a/lib/Target/ARM/ARMBaseRegisterInfo.cpp
++++ b/lib/Target/ARM/ARMBaseRegisterInfo.cpp
+@@ -177,6 +177,7 @@ getReservedRegs(const MachineFunction &MF) const {
+   // FIXME: avoid re-calculating this every time.
+   BitVector Reserved(getNumRegs());
+   markSuperRegs(Reserved, ARM::SP);
++  markSuperRegs(Reserved, ARM::R10);
+   markSuperRegs(Reserved, ARM::PC);
+   markSuperRegs(Reserved, ARM::FPSCR);
+   markSuperRegs(Reserved, ARM::APSR_NZCV);
+diff --git a/lib/Target/ARM/ARMCallingConv.td b/lib/Target/ARM/ARMCallingConv.td
+index bc7afdb..81c89d8 100644
+--- a/lib/Target/ARM/ARMCallingConv.td
++++ b/lib/Target/ARM/ARMCallingConv.td
+@@ -252,7 +252,7 @@ def CSR_AAPCS : CalleeSavedRegs<(add LR, R11, R10, R9, R8, R7, R6, R5, R4,
+ // PrologEpilogInserter to allocate frame index slots. So when R7 is the frame
+ // pointer, we use this AAPCS alternative.
+ def CSR_AAPCS_SplitPush : CalleeSavedRegs<(add LR, R7, R6, R5, R4,
+-                                               R11, R10, R9, R8,
++                                               R11, R9, R8,
+                                                (sequence "D%u", 15, 8))>;
+ 
+ // Constructors and destructors return 'this' in the ARM C++ ABI; since 'this'

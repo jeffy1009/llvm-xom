@@ -1,0 +1,255 @@
+diff --git a/lib/Target/ARM/ARMTestPass.cpp b/lib/Target/ARM/ARMTestPass.cpp
+index 1dd73cd..5b36a14 100644
+--- a/lib/Target/ARM/ARMTestPass.cpp
++++ b/lib/Target/ARM/ARMTestPass.cpp
+@@ -40,6 +40,17 @@ EnableXOMSFI("xom-sfi-mode", cl::Hidden, cl::ZeroOrMore,
+              cl::desc("use SFI for XOM instrumentation"),
+              cl::init(false));
+ 
++static cl::opt<int>
++XOMInstStart("xom-inst-start", cl::Hidden, cl::ZeroOrMore,
++             cl::desc("XOM instrumentation start"),
++             cl::init(0));
++
++static cl::opt<int>
++XOMInstEnd("xom-inst-end", cl::Hidden, cl::ZeroOrMore,
++           cl::desc("XOM instrumentation end"),
++           cl::init(1000));
++
++
+ namespace llvm {
+ void initializeARMTestPassPass(PassRegistry &);
+ }
+@@ -72,7 +83,7 @@ namespace {
+ 
+     bool instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+                  MachineBasicBlock &MFI, bool isStore);
+-    bool instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
++    bool instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, MachineOperand *base_MO,
+                     bool isStore);
+     bool instImm(unsigned Opcode, unsigned new_opcode,
+                  MachineInstr &MI, MachineBasicBlock &MFI, bool isStore);
+@@ -311,18 +322,38 @@ instReg(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+ }
+ 
+ bool ARMTestPass::
+-instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
++instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, MachineOperand *base_MO,
+            bool isStore) {
+   unsigned PredReg;
+   assert(getInstrPredicate(MI, PredReg)==ARMCC::AL);
+ 
+   if (isStore) {
+-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+-      .addReg(base_reg).addImm(ST_BOUNDARY).add(predOps(ARMCC::AL));
++    MachineInstrBuilder MIB =
++      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri));
++
++    // if (base_MO->isReg()) {
++    if (1) {
++      MIB.addReg(base_MO->getReg());
++    } else {
++      assert(base_MO->isFI());
++      MIB.addFrameIndex(base_MO->getIndex());
++    }
++
++    MIB.addImm(ST_BOUNDARY).add(predOps(ARMCC::AL));
+     MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::LO);
+   } else {
+-    BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri))
+-      .addReg(base_reg).addImm(LD_BOUNDARY).add(predOps(ARMCC::AL));
++    MachineInstrBuilder MIB
++      = BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(ARM::t2CMPri));
++
++    // if (base_MO->isReg()) {
++    if (1) {
++      MIB.addReg(base_MO->getReg());
++    } else {
++      assert(base_MO->isFI());
++      MIB.addFrameIndex(base_MO->getIndex());
++    }
++
++    MIB.addImm(LD_BOUNDARY).add(predOps(ARMCC::AL));
+     MI.getOperand(MI.findFirstPredOperandIdx()).setImm(ARMCC::HS);
+   }
+   MI.addOperand(MachineOperand::CreateReg(ARM::CPSR, /* isDef= */ false,
+@@ -330,9 +361,25 @@ instImmSFI(MachineInstr &MI, MachineBasicBlock &MFI, unsigned base_reg,
+   return false; // don't erase the MI
+ }
+ 
++static int instCount = 0;
+ bool ARMTestPass::
+ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+         MachineBasicBlock &MFI, bool isStore) {
++  if (!MI.getOperand(1).isReg()) {
++    // TODO: handle frame index
++    // assert(Opcode == ARM::t2STRi12
++    //        || Opcode == ARM::t2STRHi12
++    //        || Opcode == ARM::t2STRBi12
++    //        || Opcode == ARM::t2LDRi12
++    //        || Opcode == ARM::t2LDRHi12
++    //        || Opcode == ARM::t2LDRSHi12
++    //        || Opcode == ARM::t2LDRBi12
++    //        || Opcode == ARM::t2LDRSBi12);
++    assert(MI.getOperand(1).isFI());
++    // dbgs() << "Load/store with frame index. Opcode: " << Opcode << '\n';
++    return false;
++  }
++
+   MachineOperand *value_MO;
+   unsigned idx_reg = -1; // pre/post index
+   MachineOperand *base_MO;
+@@ -350,10 +397,10 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+     new_inst_imm = MI.getOperand(2).getImm();
+     if (new_inst_imm < 256) {
+       offset_imm = new_inst_imm;
+-      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset < 256\n";
++      // dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset < 256\n";
+     } else {
+       new_inst = INST_ADD_IMM;
+-      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
++      // dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
+     }
+   }else {
+     assert(isT4Encoding(Opcode));
+@@ -411,11 +458,11 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+     }
+   }
+ 
+-  if (requirePrivilege(base_MO->getReg()))
++  if (base_MO->isReg() && requirePrivilege(base_MO->getReg()))
+     return false;
+ 
+   if (EnableXOMSFI)
+-    return instImmSFI(MI, MFI, base_MO->getReg(), isStore);
++    return instImmSFI(MI, MFI, base_MO, isStore);
+ 
+   unsigned value_reg = value_MO->getReg();
+   new_opcode = getPrivilegedOpcode(new_opcode);
+@@ -448,11 +495,18 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+         .addReg(tmp_reg, RegState::Kill).addImm(offset_imm)
+         .add(predOps(ARMCC::AL));
+     } else {
+-      BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
++      MachineInstrBuilder MIB
++        = BuildMI(MFI, &MI, MI.getDebugLoc(), TII->get(new_opcode))
+         .addReg(value_reg,
+-                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define)
+-        .addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0).addImm(offset_imm)
+-        .add(predOps(ARMCC::AL));
++                isStore? (value_MO->isKill() ? RegState::Kill : 0) : RegState::Define);
++
++      // if (base_MO->isReg())
++      if (1)
++        MIB.addReg(base_MO->getReg(), base_MO->isKill() ? RegState::Kill : 0);
++      else
++        MIB.addFrameIndex(base_MO->getIndex());
++
++      MIB.addImm(offset_imm).add(predOps(ARMCC::AL));
+     }
+     break;
+   }
+@@ -493,7 +547,7 @@ instLDSTDouble(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
+   }
+ 
+   if (EnableXOMSFI)
+-    return instImmSFI(MI, MFI, base_MO->getReg(), isStore);
++    return instImmSFI(MI, MFI, base_MO, isStore);
+ 
+   new_opcode = getPrivilegedOpcode(new_opcode);
+   if (new_inst != INST_NONE) {
+@@ -637,9 +691,54 @@ bool ARMTestPass::instMemoryOp(MachineInstr &MI, MachineBasicBlock &MFI) {
+   case ARM::t2STRDi8:
+     return instLDSTDouble(Opcode, XOM_ST_W, MI, MFI, true);
+ 
+-  default:
++  case TargetOpcode::DBG_VALUE: case TargetOpcode::COPY: case TargetOpcode::IMPLICIT_DEF:
++  case TargetOpcode::INLINEASM:
++
++  case ARM::ADJCALLSTACKUP: case ARM::ADJCALLSTACKDOWN: case ARM::PHI: case ARM::MEMCPY:
++  case ARM::tPICADD:
++
++  case ARM::t2MOVi: case ARM::t2MOVi16: case ARM::t2MOVi32imm:
++  case ARM::t2MOVsrl_flag: case ARM::t2MOVsra_flag:
++  case ARM::t2MOVCCi: case ARM::t2MOVCCi16: case ARM::t2MOVCCi32imm: case ARM::t2MOVCCr:
++  case ARM::t2MOVCCasr: case ARM::t2MOVCClsl: case ARM::t2MOVCClsr:
++  case ARM::t2MVNi: case ARM::t2MVNr: case ARM::t2MVNCCi:
++  case ARM::t2LEApcrelJT:
++  case ARM::t2SXTH: case ARM::t2SXTB: case ARM::t2UXTH: case ARM::t2UXTB:
++  case ARM::t2ADDri: case ARM::t2ADDrr: case ARM::t2ADDrs: case ARM::t2ADDri12:
++  case ARM::t2ADCri: case ARM::t2ADCrr: case ARM::t2ADCrs:
++  case ARM::t2SUBri: case ARM::t2SUBrr: case ARM::t2SUBrs: case ARM::t2SUBri12:
++  case ARM::t2SBCri: case ARM::t2SBCrr: case ARM::t2SBCrs:
++  case ARM::t2RSBri: case ARM::t2RSBrs:
++  case ARM::t2MUL: case ARM::t2MLA: case ARM::t2MLS:
++  case ARM::t2SMLAL: case ARM::t2SMULL: case ARM::t2UMLAL: case ARM::t2UMULL:
++  case ARM::t2SDIV: case ARM::t2UDIV:
++  case ARM::t2ANDri: case ARM::t2ANDrr: case ARM::t2ANDrs:
++  case ARM::t2ORRri: case ARM::t2ORRrr: case ARM::t2ORRrs:
++  case ARM::t2ORNri: case ARM::t2ORNrr:
++  case ARM::t2EORrr: case ARM::t2EORri: case ARM::t2EORrs:
++  case ARM::t2ASRri: case ARM::t2ASRrr:
++  case ARM::t2LSLri: case ARM::t2LSLrr: case ARM::t2LSRri: case ARM::t2LSRrr:
++  case ARM::t2RORri: case ARM::t2RORrr: case ARM::t2RRX:
++  case ARM::t2BICrr: case ARM::t2BICri: case ARM::t2BICrs: case ARM::t2BFC: case ARM::t2BFI:
++  case ARM::t2SBFX: case ARM::t2UBFX:
++  case ARM::t2CLZ:
++  case ARM::t2RBIT: case ARM::t2REV: case ARM::t2REV16:
++
++  case ARM::t2CMNri: case ARM::t2CMNzrr:
++  case ARM::t2CMPri: case ARM::t2CMPrr: case ARM::t2CMPrs:
++  case ARM::t2TSTri: case ARM::t2TSTrr: case ARM::t2TSTrs:
++  case ARM::t2TEQri: case ARM::t2TEQrr: case ARM::t2TEQrs:
++  case ARM::tBL: case ARM::tBLXr: case ARM::tBX_RET:
++  case ARM::t2B: case ARM::t2Bcc: case ARM::t2BR_JT:
++  case ARM::TCRETURNdi: case ARM::TCRETURNri:
++    return false;
++
++  default: {
++    dbgs() << "warning: unhandled opcode " <<  TII->getName(MI.getOpcode()) << '\n';
++    assert(0);
+     return false;
+   }
++  }
+   return false;
+ }
+ 
+@@ -653,15 +752,31 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
+   // MF  = &Fn;
+ 
+   bool Modified = false;
++  instCount = 0;
++    if(1
++       // && Fn.getName().compare(StringRef("__sfputc_r")) != 0
++       // && Fn.getName().compare(StringRef("__cvt")) != 0
++       // && Fn.getName().compare(StringRef("_printf_common")) != 0
++       // && Fn.getName().compare(StringRef("__swbuf_r")) != 0
++       // && Fn.getName().compare(StringRef("_puts_r")) != 0
++       // && Fn.getName().compare(StringRef("__swsetup_r")) != 0
++       // && Fn.getName().compare(StringRef("_dtoa_r")) != 0
++       // && Fn.getName().compare(StringRef("__sflush_r")) != 0
++       // && Fn.getName().compare(StringRef("__sfmoreglue")) != 0
++       // && Fn.getName().compare(StringRef("__smakebuf_r")) != 0
++       // && Fn.getName().compare(StringRef("_Balloc")) != 0
++       // && Fn.getName().compare(StringRef("_free_r")) != 0
++       // && Fn.getName().compare(StringRef("__sseek")) != 0
++       // && Fn.getName().compare(StringRef("_malloc_r")) != 0
++       ){
++           // dbgs() << "Current function name: [" << Fn.getName() << "]\n";
++      //return Modified;
++        }
++    if(Fn.getName().compare(StringRef("__sfputc_r")) == 0)
++      return Modified;
+ 
++       // dbgs() << "Current function name: [" << Fn.getName() << "]\n";
+   for (MachineBasicBlock &MFI : Fn) {
+-    /*
+-    if(Fn.getName().compare(StringRef("SolveCubic")) != 0){
+-          // dbgs() << "Current function name: [" << Fn.getName() << "]\n";
+-          continue;
+-        }
+-    */
+-    //    dbgs() << "Current function name: [" << Fn.getName() << "]\n";
+     MachineBasicBlock::iterator MBBI = MFI.begin(), MBBIE = MFI.end();
+     while (MBBI != MBBIE) {
+       MachineBasicBlock::iterator NMBBI = std::next(MBBI);

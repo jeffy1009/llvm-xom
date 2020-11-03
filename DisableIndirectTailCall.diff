@@ -1,0 +1,57 @@
+diff --git a/lib/IR/LegacyPassManager.cpp b/lib/IR/LegacyPassManager.cpp
+index 995e1e5..bb1202b 100644
+--- a/lib/IR/LegacyPassManager.cpp
++++ b/lib/IR/LegacyPassManager.cpp
+@@ -91,6 +91,11 @@ static cl::list<std::string>
+                             "options"),
+                    cl::CommaSeparated);
+ 
++cl::opt<bool>
++EnableXOMInst("enable-xom-inst", cl::Hidden, cl::ZeroOrMore,
++              cl::desc("Enable XOM instrumentation"),
++              cl::init(false));
++
+ /// This is a helper to determine whether to print IR before or
+ /// after a pass.
+ 
+diff --git a/lib/Target/ARM/ARMTargetMachine.cpp b/lib/Target/ARM/ARMTargetMachine.cpp
+index 88bf1ce..e084e72 100644
+--- a/lib/Target/ARM/ARMTargetMachine.cpp
++++ b/lib/Target/ARM/ARMTargetMachine.cpp
+@@ -74,10 +74,7 @@ static cl::opt<cl::boolOrDefault>
+ EnableGlobalMerge("arm-global-merge", cl::Hidden,
+                   cl::desc("Enable the global merge pass"));
+ 
+-cl::opt<bool>
+-EnableXOMInst("enable-xom-inst", cl::Hidden, cl::ZeroOrMore,
+-              cl::desc("Enable XOM instrumentation"),
+-              cl::init(false));
++extern cl::opt<bool> EnableXOMInst;
+ 
+ namespace llvm {
+   void initializeARMExecutionDepsFixPass(PassRegistry&);
+diff --git a/lib/Transforms/Scalar/TailRecursionElimination.cpp b/lib/Transforms/Scalar/TailRecursionElimination.cpp
+index 90c5c24..e69e6f3 100644
+--- a/lib/Transforms/Scalar/TailRecursionElimination.cpp
++++ b/lib/Transforms/Scalar/TailRecursionElimination.cpp
+@@ -87,6 +87,8 @@ STATISTIC(NumEliminated, "Number of tail calls removed");
+ STATISTIC(NumRetDuped,   "Number of return duplicated");
+ STATISTIC(NumAccumAdded, "Number of accumulators introduced");
+ 
++extern cl::opt<bool> EnableXOMInst;
++
+ /// \brief Scan the specified function for alloca instructions.
+ /// If it contains any dynamic allocas, returns false.
+ static bool canTRE(Function &F) {
+@@ -231,6 +233,11 @@ static bool markTails(Function &F, bool &AllCallsAreTailCalls) {
+       if (!CI || CI->isTailCall())
+         continue;
+ 
++      if (EnableXOMInst && !CI->getCalledFunction()) {
++        AllCallsAreTailCalls = false;
++        continue;
++      }
++
+       bool IsNoTail = CI->isNoTailCall() || CI->hasOperandBundles();
+ 
+       if (!IsNoTail && CI->doesNotAccessMemory()) {

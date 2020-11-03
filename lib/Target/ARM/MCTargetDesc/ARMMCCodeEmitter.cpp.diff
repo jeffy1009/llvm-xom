@@ -1,0 +1,96 @@
+diff --git a/lib/Target/ARM/MCTargetDesc/ARMMCCodeEmitter.cpp b/lib/Target/ARM/MCTargetDesc/ARMMCCodeEmitter.cpp
+index f1f35f4..fad04b3 100644
+--- a/lib/Target/ARM/MCTargetDesc/ARMMCCodeEmitter.cpp
++++ b/lib/Target/ARM/MCTargetDesc/ARMMCCodeEmitter.cpp
+@@ -34,6 +34,7 @@
+ #include "llvm/Support/ErrorHandling.h"
+ #include "llvm/Support/MathExtras.h"
+ #include "llvm/Support/raw_ostream.h"
++#include "llvm/Support/Debug.h"
+ #include <algorithm>
+ #include <cassert>
+ #include <cstdint>
+@@ -1683,6 +1684,8 @@ getShiftRight64Imm(const MCInst &MI, unsigned Op,
+   return 64 - MI.getOperand(Op).getImm();
+ }
+ 
++MCInst TmpInst2;
++
+ void ARMMCCodeEmitter::
+ encodeInstruction(const MCInst &MI, raw_ostream &OS,
+                   SmallVectorImpl<MCFixup> &Fixups,
+@@ -1705,6 +1708,74 @@ encodeInstruction(const MCInst &MI, raw_ostream &OS,
+   if (isThumb(STI) && Size == 4) {
+     EmitConstant(Binary >> 16, 2, OS);
+     EmitConstant(Binary & 0xffff, 2, OS);
++    // if (TmpInst2.size() > 0) {
++    //   SmallVector<MCFixup, 4> TmpFixups;
++    //   uint32_t Binary2 = getBinaryCodeForInstr(TmpInst2, TmpFixups, STI);
++    //   DEBUG(dbgs() << "blah");
++    // }
++
++    uint32_t unintended_5b = Binary & 0xf800;
++    uint32_t unintended_7b = Binary & 0xfe00;
++    uint32_t unintended10b = Binary & 0xffc0;
++    uint32_t unintended12b = Binary & 0xfff0;
++    if (unintended10b == 0xe880 // LDM,LDMIA,LDMFD T2
++        || unintended10b == 0xe900 // LDMDB,LDMEA T1
++        || unintended12b == 0xf8d0 // LDR (immediate) T3
++        || unintended12b == 0xf850 // LDR (immediate) T4
++        // || unintended12b == 0xf850 // LDR (register) T2
++        || unintended12b == 0xf890 // LDRB (immediate) T2
++        || unintended12b == 0xf810 // LDRB (immediate) T3
++        // || unintended12b == 0xf810 // LDRB (register) T2
++        || unintended_7b == 0xe800 // LDRD (immediate) T1
++        || unintended12b == 0xe850 // LDREX T1
++        || unintended12b == 0xe8d0 // LDREXB T1
++        // || unintended12b == 0xe8d0 // LDREXH T1
++        || unintended12b == 0xf8b0 // LDRH (immediate) T2
++        || unintended12b == 0xf830 // LDRH (immediate) T3
++        // || unintended12b == 0xf830 // LDRH (register) T3
++        || unintended12b == 0xf990 // LDRSB (immediate) T1
++        || unintended12b == 0xf910 // LDRSB (immediate) T2
++        // || unintended12b == 0xf910 // LDRSB (register) T2
++        || unintended12b == 0xf9b0 // LDRSH (immediate) T1
++        || unintended12b == 0xf930 // LDRSH (immediate) T2
++        // || unintended12b == 0xf930 // LDRSH (register) T2
++        // || unintended10b == 0xe880 // STM,STMIA,STMEA T2
++        // || unintended10b == 0xe900 // STMDB,STMFD T1
++        || unintended12b == 0xf8c0 // STR (immediate) T3
++        || unintended12b == 0xf840 // STR (immediate) T4
++        // || unintended12b == 0xf840 // STR (register) T2
++        || unintended12b == 0xf880 // STRB (immediate) T2
++        || unintended12b == 0xf800 // STRB (immediate) T3
++        // || unintended12b == 0xf800 // STRB (register) T2
++        || unintended_7b == 0xe800 // STRD (immediate) T1
++        || unintended12b == 0xe840 // STREX T1
++        || unintended12b == 0xe8c0 // STREXB T1
++        // || unintended12b == 0xe8c0 // STREXH T1
++        || unintended12b == 0xf8a0 // STRH (immediate) T2
++        || unintended12b == 0xf820 // STRH (immediate) T3
++        // || unintended12b == 0xf820 // STRH (register) T3
++        ) {
++      dbgs() << "Found unintended 32bit: "; dbgs().write_hex(Binary&0xffff); dbgs() << "\n";
++      EmitConstant(0xbf00, 2, OS);
++    } else if (unintended_5b == 0xc800 // LDM,LDMIA,LDMFD T1
++               || unintended_5b == 0x6800 // LDR (immediate) T1
++               || unintended_7b == 0x5800 // LDR (register) T1
++               || unintended_5b == 0x7800 // LDRB (immediate) T1
++               || unintended_7b == 0x5c00 // LDRB (register) T1
++               || unintended_5b == 0x8800 // LDRH (immediate) T1
++               || unintended_7b == 0x5a00 // LDRH (register) T1
++               || unintended_7b == 0x5600 // LDRSB (register) T1
++               || unintended_7b == 0x5e00 // LDRSH (register) T1
++               || unintended_5b == 0xc000 // STM,STMIA,STMEA T1
++               || unintended_5b == 0x6000 // STR (immediate) T1
++               || unintended_7b == 0x5000 // STR (register) T1
++               || unintended_5b == 0x7000 // STRB (immediate) T1
++               || unintended_7b == 0x5400 // STRB (register) T1
++               || unintended_5b == 0x8000 // STRH (immediate) T1
++               || unintended_7b == 0x5200 // STRH (register) T1
++               ) {
++      dbgs() << "Found unintended 16bit: "; dbgs().write_hex(Binary&0xffff); dbgs() << "\n";
++    }
+   } else
+     EmitConstant(Binary, Size, OS);
+   ++MCNumEmitted;  // Keep track of the # of mi's emitted.
