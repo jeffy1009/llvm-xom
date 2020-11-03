@@ -70,6 +70,7 @@ add_llvm_target(ARMCodeGen
   ARMBranchSFI.cpp
   ARMSandboxSP.cpp
   ARMTrampoline.cpp
+  ARMRemoveUnintended.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
   )
 

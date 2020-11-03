@@ -50,6 +50,7 @@ FunctionPass *createARMTestPassPass();
 FunctionPass *createARMXOMPseudoExpandPass();
 FunctionPass *createARMBranchSFIPass();
 FunctionPass *createARMSandboxSPPass();
+FunctionPass *createARMRemoveUnintendedPass();
 FunctionPass *createARMTrampolinePass(); // gykim
 
 InstructionSelector *

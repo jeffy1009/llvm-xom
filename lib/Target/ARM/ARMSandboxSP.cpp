@@ -90,7 +90,7 @@ bool ARMSandboxSP::searchForMemAccess(DenseMap<MachineBasicBlock*, bool> &MBBInf
   MachineBasicBlock::iterator MBBIE = MBB->end();
   while (MBBI != MBBIE) {
     MachineInstr *MI = &*MBBI;
-    PRINT_INDENT; MI->dump();
+    //PRINT_INDENT; MI->dump();
     switch (MI->getOpcode()) {
     case ARM::t2LDRi12: case ARM::t2LDRHi12: case ARM::t2LDRBi12:
     case ARM::t2LDRSHi12: case ARM::t2LDRSBi12:
@@ -222,6 +222,7 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
         dbgs() << "Non-constant SP modification: "
                << TII->getName(MI.getOpcode()) << "\n";
         ++NonConstantCount;
+        // TODO: fix this into compare-based
         BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2BICri), ARM::SP)
           .addReg(ARM::SP).addImm(0xd0000000).add(predOps(ARMCC::AL)).add(condCodeOp());
         BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2ORRri), ARM::SP)
@@ -239,6 +240,15 @@ bool ARMSandboxSP::runOnMachineFunction(MachineFunction &Fn) {
           // TODO: do this correctly
           BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2BICri), ARM::SP)
             .addReg(ARM::SP).addImm(0xd0000000).add(predOps(ARMCC::AL)).add(condCodeOp());
+          // assert(MI.getOpcode()==ARM::tSUBspi || MI.getOpcode()==ARM::t2SUBri
+          //        || MI.getOpcode()==ARM::tADDspi || MI.getOpcode()==ARM::t2ADDri);
+          // if ((MI.getOpcode()==ARM::tSUBspi || MI.getOpcode()==ARM::t2SUBri)
+          //   && MFI.isLiveIn(ARM::R3))
+          //   BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::t2LDRi12), ARM::R12)
+          //     .addReg(ARM::SP).addImm(0).add(predOps(ARMCC::AL));
+          // else
+          //   BuildMI(MFI, NMBBI, MI.getDebugLoc(), TII->get(ARM::tLDRspi), ARM::R3)
+          //     .addReg(ARM::SP).addImm(0).add(predOps(ARMCC::AL));
         } else {
           dbgs() << "Memory Access Search SUCCESS\n";
           ++ConstantSuccessCount;

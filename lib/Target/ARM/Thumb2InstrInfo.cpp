@@ -647,9 +647,11 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
     MachineFunction &MF = *MI.getParent()->getParent();
     MachineRegisterInfo *MRI = &MF.getRegInfo();
     if (EnableXOMInst && !EnableXOMSFI && !MRI->isSSA() && FrameReg != ARM::SP) {
-      dbgs() << "Frame Access using register other than SP. Opcode:" << NewOpc << '\n';
+      //dbgs() << "Frame Access using register other than SP. Opcode:" << NewOpc << '\n';
       NumBits = 8;
     }
+    // if (FrameReg == ARM::SP) assert(MI.getOperand(FrameRegIdx).getIndex()>=0);
+    // else assert(MI.getOperand(FrameRegIdx).getIndex()<0);
 
     MachineOperand &ImmOp = MI.getOperand(FrameRegIdx+1);
 

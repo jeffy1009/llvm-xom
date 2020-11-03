@@ -559,6 +559,9 @@ public:
     return RC;
   }
 
+  virtual unsigned getCostPerUse2(unsigned VirtReg, unsigned PhysReg,
+                                  MachineFunction *MF) const { return 0; }
+
   /// Return the subregister index you get from composing
   /// two subregister indices.
   ///

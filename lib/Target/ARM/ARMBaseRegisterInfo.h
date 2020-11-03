@@ -205,6 +205,8 @@ public:
                       const TargetRegisterClass *DstRC,
                       unsigned DstSubReg,
                       const TargetRegisterClass *NewRC) const override;
+
+  unsigned getCostPerUse2(unsigned VirtReg, unsigned PhysReg, MachineFunction *MF) const override;
 };
 
 } // end namespace llvm

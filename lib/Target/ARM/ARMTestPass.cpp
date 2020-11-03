@@ -2,7 +2,7 @@
 // #include "ARMBaseInstrInfo.h"
 // #include "ARMBaseRegisterInfo.h"
 // #include "ARMISelLowering.h"
-// #include "ARMMachineFunctionInfo.h"
+#include "ARMMachineFunctionInfo.h"
 #include "ARMSubtarget.h"
 // #include "MCTargetDesc/ARMAddressingModes.h"
 // #include "ThumbRegisterInfo.h"
@@ -426,6 +426,18 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
         MachineBasicBlock &MFI, bool isStore) {
   if (!MI.getOperand(1).isReg()) {
     assert(MI.getOperand(1).isFI());
+    // const ARMBaseRegisterInfo *TRI =
+    //   static_cast<const ARMBaseRegisterInfo *>(MRI->getTargetRegisterInfo());
+    // MachineBasicBlock &MBB = *MI.getParent();
+    // MachineFunction &MF = *MBB.getParent();
+    // const ARMFrameLowering *TFI = TRI->getFrameLowering(MF);
+    // ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
+    // assert(!AFI->isThumb1OnlyFunction() &&
+    //        "This eliminateFrameIndex does not support Thumb1!");
+    // int FrameIndex = MI.getOperand(1).getIndex();
+    // unsigned FrameReg;
+    // int Offset = TFI->ResolveFrameIndexReference(MF, FrameIndex, FrameReg, 0);
+    // dbgs() << Offset << ' ' << FrameReg << '\n';
     return false;
   }
 
@@ -449,10 +461,10 @@ instImm(unsigned Opcode, unsigned new_opcode, MachineInstr &MI,
     new_inst_imm = MI.getOperand(2).getImm();
     if (new_inst_imm < 256) {
       offset_imm = new_inst_imm;
-      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset < 256\n";
+      // dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset < 256\n";
     } else {
       new_inst = INST_ADD_IMM;
-      dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
+      // dbgs() << "T3 encoding " << (isStore? "str" : "ldr") << " (imm) : offset >= 256\n";
     }
   }else {
     assert(isT4Encoding(Opcode));
@@ -957,16 +969,16 @@ bool ARMTestPass::runOnMachineFunction(MachineFunction &Fn) {
   }
 
   dbgs() << "Current function name   : " << Fn.getName() << "\n";
-  dbgs() << "InstRegCount            : " << InstRegCount  << "\n";
-  dbgs() << "InstImmPreIdxCount      : " << InstImmPreIdxCount  << "\n";
-  dbgs() << "InstImmPostIdxCount     : " << InstImmPostIdxCount  << "\n";
-  dbgs() << "InstImmNoIdxOffsetCount : " << InstImmNoIdxOffsetCount  << "\n";
-  dbgs() << "InstImmNoIdxCount       : " << InstImmNoIdxCount  << "\n";
-  dbgs() << "InstDoubleOffsetCount   : " << InstDoubleOffsetCount  << "\n";
-  dbgs() << "InstDoubleCount         : " << InstDoubleCount  << "\n";
-  dbgs() << "InstRegPrivCount        : " << InstRegPrivCount  << "\n";
-  dbgs() << "InstImmPrivVarCount     : " << InstImmPrivVarCount  << "\n";
-  dbgs() << "InstImmPrivCount        : " << InstImmPrivCount  << "\n";
+  // dbgs() << "InstRegCount            : " << InstRegCount  << "\n";
+  // dbgs() << "InstImmPreIdxCount      : " << InstImmPreIdxCount  << "\n";
+  // dbgs() << "InstImmPostIdxCount     : " << InstImmPostIdxCount  << "\n";
+  // dbgs() << "InstImmNoIdxOffsetCount : " << InstImmNoIdxOffsetCount  << "\n";
+  // dbgs() << "InstImmNoIdxCount       : " << InstImmNoIdxCount  << "\n";
+  // dbgs() << "InstDoubleOffsetCount   : " << InstDoubleOffsetCount  << "\n";
+  // dbgs() << "InstDoubleCount         : " << InstDoubleCount  << "\n";
+  // dbgs() << "InstRegPrivCount        : " << InstRegPrivCount  << "\n";
+  // dbgs() << "InstImmPrivVarCount     : " << InstImmPrivVarCount  << "\n";
+  // dbgs() << "InstImmPrivCount        : " << InstImmPrivCount  << "\n";
 
   return Modified;
 }

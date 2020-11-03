@@ -697,8 +697,10 @@ unsigned RAGreedy::tryAssign(LiveInterval &VirtReg,
       SetOfBrokenHints.insert(&VirtReg);
     }
 
+  unsigned Cost = TRI->getCostPerUse2(VirtReg.reg, PhysReg, MF);
   // Try to evict interference from a cheaper alternative.
-  unsigned Cost = TRI->getCostPerUse(PhysReg);
+  if (!Cost)
+    Cost = TRI->getCostPerUse(PhysReg);
 
   // Most registers have 0 additional cost.
   if (!Cost)
@@ -952,6 +954,8 @@ unsigned RAGreedy::tryEvict(LiveInterval &VirtReg,
 
   Order.rewind();
   while (unsigned PhysReg = Order.next(OrderLimit)) {
+    // if (TRI->getCostPerUse2(VirtReg.reg, PhysReg, MF) >= CostPerUseLimit)
+    //   continue;
     if (TRI->getCostPerUse(PhysReg) >= CostPerUseLimit)
       continue;
     // The first use of a callee-saved register in a function has cost 1.

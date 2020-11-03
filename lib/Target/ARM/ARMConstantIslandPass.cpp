@@ -377,7 +377,7 @@ bool ARMConstantIslands::runOnMachineFunction(MachineFunction &mf) {
     // Blocks may have shifted around. Keep the numbering up to date.
     MF->RenumberBlocks();
   }
-
+  assert(MCP->isEmpty());
   // Perform the initial placement of the constant pool entries.  To start with,
   // we put them all at the end of the function.
   std::vector<MachineInstr*> CPEMIs;

@@ -57,8 +57,8 @@ static void addIndirectTrampolinePass(const PassManagerBuilder &builder,
 }
 
 // set pass
-static RegisterStandardPasses s(PassManagerBuilder::EP_OptimizerLast,
-				addIndirectTrampolinePass);
+// static RegisterStandardPasses s(PassManagerBuilder::EP_OptimizerLast,
+// 				addIndirectTrampolinePass);
 
 INITIALIZE_PASS(IndirectTrampolinePass, "indirect-trampoline-pass", "IndirectTrampoline Pass", false, false)
 

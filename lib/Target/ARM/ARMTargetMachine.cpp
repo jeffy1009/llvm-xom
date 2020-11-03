@@ -352,6 +352,7 @@ public:
   void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
+  void addPreEmitPass2() override;
 };
 
 class ARMExecutionDepsFix : public ExecutionDepsFix {
@@ -510,4 +511,8 @@ void ARMPassConfig::addPreEmitPass() {
   // gykim
   if (EnableTrampoline)
     addPass(createARMTrampolinePass());
+}
+
+void ARMPassConfig::addPreEmitPass2() {
+    addPass(createARMRemoveUnintendedPass());
 }
